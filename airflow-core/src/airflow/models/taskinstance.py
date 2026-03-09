@@ -34,6 +34,7 @@ import dill
 import uuid6
 from sqlalchemy import (
     JSON,
+    Boolean,
     Float,
     ForeignKey,
     ForeignKeyConstraint,
@@ -493,6 +494,13 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
         nullable=True,
     )
     dag_version = relationship("DagVersion", back_populates="task_instances")
+
+    # Simulation fields (Sprint 2)
+    is_simulation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="0"
+    )
+    estimated_runtime: Mapped[float | None] = mapped_column(Float, nullable=True)
+    predicted_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     __table_args__ = (
         Index("ti_dag_state", dag_id, state),
@@ -1267,6 +1275,30 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
             external_executor_id=external_executor_id,
             session=session,
         )
+
+    def run_simulation(self, *, session: Session) -> None:
+        """
+        Run this task instance in simulation mode.
+
+        Instead of executing the actual task, uses DeterministicPredictor
+        to estimate runtime and predicted outcome, then stores the results
+        on the task instance fields.
+        """
+        from airflow.simulation.predictor_interface import DeterministicPredictor, PredictedOutcome
+
+        self.is_simulation = True
+        predictor = DeterministicPredictor()
+
+        operator_type = self.operator or "Unknown"
+        estimate = predictor.estimate_task(
+            task_id=self.task_id,
+            operator_type=operator_type,
+        )
+
+        self.estimated_runtime = float(estimate.estimated_seconds)
+        self.predicted_outcome = PredictedOutcome.SUCCESS.value
+        self.state = TaskInstanceState.SUCCESS.value
+        self.duration = self.estimated_runtime
 
     def emit_state_change_metric(self, new_state: TaskInstanceState) -> None:
         """
