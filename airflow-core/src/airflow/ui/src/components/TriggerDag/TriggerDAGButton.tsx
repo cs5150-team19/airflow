@@ -36,6 +36,7 @@ type TriggerDAGButtonProps = {
   readonly isPaused: boolean;
   readonly variant?: "ghost" | "outline";
   readonly withText?: boolean;
+  readonly label?: string;
 };
 
 export const TriggerDAGButton = ({
@@ -45,6 +46,7 @@ export const TriggerDAGButton = ({
   isPaused,
   variant = "ghost",
   withText = false,
+  label,
 }: TriggerDAGButtonProps) => {
   const isManualRunDenied =
     allowedRunTypes !== null && allowedRunTypes !== undefined && !allowedRunTypes.includes("manual");
@@ -151,7 +153,7 @@ export const TriggerDAGButton = ({
             variant={variant}
           >
             <FiPlay />
-            {translate("triggerDag.button")}
+            {label ?? translate("triggerDag.button")}
           </Button>
         ) : (
           <IconButton
@@ -164,6 +166,7 @@ export const TriggerDAGButton = ({
             variant={variant}
           >
             <FiPlay />
+            {label ?? translate("triggerDag.button")}
           </IconButton>
         )}
       </Tooltip>

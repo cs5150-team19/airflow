@@ -18,7 +18,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, HStack, Flex, useDisclosure, IconButton } from "@chakra-ui/react";
+import { Box, HStack, Flex, useDisclosure, IconButton, Button} from "@chakra-ui/react";
 import { useReactFlow } from "@xyflow/react";
 import { useRef, useState } from "react";
 import type { PropsWithChildren, ReactNode } from "react";
@@ -31,7 +31,7 @@ import {
   PanelGroup,
   PanelResizeHandle,
 } from "react-resizable-panels";
-import { Outlet, useParams } from "react-router-dom";
+import { Outlet, useNavigate , useParams , useLocation } from "react-router-dom";
 import { useLocalStorage } from "usehooks-ts";
 
 import { useDagServiceGetDag, useDagWarningServiceListDagWarnings } from "openapi/queries";
@@ -43,6 +43,7 @@ import { TriggerDAGButton } from "src/components/TriggerDag/TriggerDAGButton";
 import { ProgressBar } from "src/components/ui";
 import { Toaster } from "src/components/ui";
 import { Tooltip } from "src/components/ui/Tooltip";
+import { SimulationMenu } from "src/components/ExpandableMenu/Menu";
 import {
   dagRunsLimitKey,
   dagRunStateFilterKey,
@@ -63,6 +64,7 @@ import { Grid } from "./Grid";
 import { NavTabs } from "./NavTabs";
 import { PanelButtons } from "./PanelButtons";
 
+
 type Props = {
   readonly error?: unknown;
   readonly isLoading?: boolean;
@@ -72,6 +74,10 @@ type Props = {
 export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
   const { t: translate } = useTranslation();
   const { dagId = "", runId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isSimulating = location.pathname.endsWith("/simulation");
+
   const { data: dag } = useDagServiceGetDag({ dagId });
   const [defaultDagView] = useLocalStorage<"graph" | "grid">(DEFAULT_DAG_VIEW_KEY, "grid");
   const panelGroupRef = useRef<ImperativePanelGroupHandle | null>(null);
@@ -109,6 +115,32 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
         <HStack justifyContent="space-between" mb={2}>
           <DagBreadcrumb />
           <Flex gap={1}>
+            <HStack
+              bg="bg.muted"
+              borderRadius="full"
+              gap={0}
+              p={2}
+              marginRight={4}
+            >
+              <Button
+                borderRadius="full"
+                colorPalette="gray.600"
+                onClick={() => void navigate(`/dags/${dagId}`)}
+                size="sm"
+                variant={!isSimulating ? "solid" : "ghost"}
+              >
+                Normal Debug
+              </Button>
+              <Button
+                borderRadius="full"
+                colorPalette="gray.600"
+                onClick={() => void navigate(`/dags/${dagId}/simulation`)}
+                size="sm"
+                variant={isSimulating ? "solid" : "ghost"}
+              >
+                Simulation
+              </Button>
+            </HStack>
             <SearchDagsButton />
             {dag === undefined ? undefined : (
               <TriggerDAGButton
@@ -116,6 +148,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
                 dagDisplayName={dag.dag_display_name}
                 dagId={dag.dag_id}
                 isPaused={dag.is_paused}
+                label={isSimulating ? "Simulation Trigger" : undefined}
                 variant="outline"
                 withText
               />
@@ -197,6 +230,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
                     ) : undefined}
                   </HStack>
                 )}
+                {isSimulating && <SimulationMenu />}
               </Box>
             </Panel>
             {!isRightPanelCollapsed && (
