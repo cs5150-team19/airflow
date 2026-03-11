@@ -18,11 +18,12 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, HStack, Flex, useDisclosure, IconButton, Button} from "@chakra-ui/react";
+import { Box, HStack, Flex, useDisclosure, IconButton, Button } from "@chakra-ui/react";
 import { useReactFlow } from "@xyflow/react";
 import { useRef, useState } from "react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { FiPlay } from "react-icons/fi";
 import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { LuFileWarning } from "react-icons/lu";
 import {
@@ -31,7 +32,7 @@ import {
   PanelGroup,
   PanelResizeHandle,
 } from "react-resizable-panels";
-import { Outlet, useNavigate , useParams , useLocation } from "react-router-dom";
+import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
 import { useLocalStorage } from "usehooks-ts";
 
 import { useDagServiceGetDag, useDagWarningServiceListDagWarnings } from "openapi/queries";
