@@ -24,6 +24,7 @@ import { useContainerWidth } from "src/utils";
 
 type Props = {
   readonly tabs: Array<{ icon?: ReactNode; label: string; value: string }>;
+  readonly isSimulating?: boolean;
 };
 
 export const NavTabs = ({ tabs }: Props) => {
@@ -43,9 +44,7 @@ export const NavTabs = ({ tabs }: Props) => {
           end
           key={value}
           title={label}
-          to={{
-            pathname: value,
-          }}
+          to={value} // relative path – appends to current URL
         >
           {({ isActive }) => (
             <Center
@@ -55,7 +54,7 @@ export const NavTabs = ({ tabs }: Props) => {
               color={isActive ? "fg" : "fg.muted"}
               fontWeight="bold"
               height="40px"
-              mb="-2px" // Show the border on top of its parent's border
+              mb="-2px"
               pb={isActive ? 0 : "3px"}
               px={4}
               transition="all 0.2s ease"

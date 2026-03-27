@@ -81,20 +81,29 @@ export const buildTaskInstanceUrl = (params: {
   mapIndex?: string;
   runId: string;
   taskId: string;
+  isSimulating?: boolean;  
 }): string => {
-  const { currentPathname, dagId, isGroup = false, isMapped = false, mapIndex, runId, taskId } = params;
+  const { currentPathname, dagId, isGroup = false, isMapped = false, mapIndex, runId, taskId, isSimulating } = params;
   const groupPath = isGroup ? "group/" : "";
   // Task groups only have "Task Instances" tab, so never preserve tabs for groups
   const additionalPath = isGroup ? "" : getTaskInstanceAdditionalPath(currentPathname);
 
-  let basePath = `/dags/${dagId}/runs/${runId}/tasks/${groupPath}${taskId}`;
+  const base = isSimulating ? `/dags/${dagId}/simulation/runs/${runId}/tasks/${groupPath}${taskId}` 
+                         : `/dags/${dagId}/runs/${runId}/tasks/${groupPath}${taskId}`;
 
+  let finalPath = base;
   if (isMapped) {
-    basePath += `/mapped`;
+    finalPath += `/mapped`;
     if (mapIndex !== undefined && mapIndex !== "-1") {
-      basePath += `/${mapIndex}`;
+      finalPath += `/${mapIndex}`;
     }
   }
 
-  return `${basePath}${additionalPath}`;
+  return `${finalPath}${additionalPath}`;
+};
+
+export const addSimulationPrefix = (path: string, isSimulating: boolean): string => {
+  if (!isSimulating) return path;
+  if (path.includes('/simulation')) return path;
+  return path.replace(/^(\/dags\/[^/]+)/, '$1/simulation');
 };

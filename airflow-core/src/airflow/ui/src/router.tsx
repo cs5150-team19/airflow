@@ -174,11 +174,22 @@ export const routerConfig = [
           { element: <Events />, path: "events" },
           { element: <Code />, path: "code" },
           { element: <DagDetails />, path: "details" },
-          { element: <Simulation />, path: "simulation" },
           pluginRoute,
         ],
         element: <Dag />,
         path: "dags/:dagId",
+      },
+      {
+        children: [
+          { element: <Simulation />, index: true },
+          { element: <DagRuns />, path: "runs" },
+          { element: <Tasks />, path: "tasks" },
+          { element: <Code />, path: "code" },
+          { element: <DagDetails />, path: "details" },
+          pluginRoute,
+        ],
+        element: <Dag />,
+        path: "dags/:dagId/simulation",
       },
       {
         children: [
@@ -233,6 +244,55 @@ export const routerConfig = [
         ],
         element: <Task />,
         path: "dags/:dagId/tasks/:taskId",
+      },
+      {
+        children: [
+          { element: <TaskOverview />, index: true },
+          { element: <TaskInstances />, path: "task_instances" },
+          { element: <HITLTaskInstances />, path: "required_actions" },
+          pluginRoute,
+        ],
+        element: <Task />,
+        path: "dags/:dagId/simulation/tasks/:taskId",
+      },
+      {
+        children: [
+          { element: <TaskOverview />, index: true },
+          { element: <TaskInstances />, path: "task_instances" },
+          { element: <HITLTaskInstances />, path: "required_actions" },
+          pluginRoute,
+        ],
+        element: <Task />,
+        path: "dags/:dagId/simulation/tasks/group/:groupId",
+      },
+      {
+        children: [
+          { element: <TaskInstances />, index: true },
+          { element: <DagRunDetails />, path: "details" },
+          pluginRoute,
+        ],
+        element: <Run />,
+        path: "dags/:dagId/simulation/runs/:runId",
+      },
+      {
+        children: taskInstanceRoutes,
+        element: <TaskInstance />,
+        path: "dags/:dagId/simulation/runs/:runId/tasks/:taskId",
+      },
+      {
+        children: [{ element: <TaskInstances />, index: true }],
+        element: <MappedTaskInstance />,
+        path: "dags/:dagId/simulation/runs/:runId/tasks/:taskId/mapped",
+      },
+      {
+        children: taskInstanceRoutes,
+        element: <TaskInstance />,
+        path: "dags/:dagId/simulation/runs/:runId/tasks/:taskId/mapped/:mapIndex",
+      },
+      {
+        children: [{ element: <TaskInstances />, index: true }],
+        element: <GroupTaskInstance />,
+        path: "dags/:dagId/simulation/runs/:runId/tasks/group/:groupId",
       },
       {
         element: <ErrorPage />,
