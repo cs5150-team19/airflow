@@ -34,9 +34,10 @@ type Props = {
   readonly onClick?: () => void;
   readonly runId: string;
   readonly taskId: string;
+  readonly isSimulating?: boolean;
 };
 
-export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, taskId }: Props) => {
+export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, taskId, isSimulating = false}: Props) => {
   const { hoveredTaskId, setHoveredTaskId } = useHover();
   const { groupId: selectedGroupId, taskId: selectedTaskId } = useParams();
   const location = useLocation();
@@ -50,6 +51,7 @@ export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, tas
     isMapped: Boolean(isMapped),
     runId,
     taskId,
+    isSimulating
   });
 
   const handleMouseEnter = () => setHoveredTaskId(taskId);

@@ -31,6 +31,7 @@ import { DagVersionIndicator } from "./VersionIndicator";
 import type { GridTask } from "./utils";
 
 type Props = {
+  readonly isSimulating?: boolean;
   readonly nodes: Array<GridTask>;
   readonly onCellClick?: () => void;
   readonly run: GridRunsResponse;
@@ -41,6 +42,7 @@ type Props = {
 const ROW_HEIGHT = 20;
 
 export const TaskInstancesColumn = ({
+  isSimulating = false,
   nodes,
   onCellClick,
   run,
@@ -150,6 +152,7 @@ export const TaskInstancesColumn = ({
               onClick={onCellClick}
               runId={run.run_id}
               taskId={node.id}
+              isSimulating={isSimulating}
             />
           </Box>
         );

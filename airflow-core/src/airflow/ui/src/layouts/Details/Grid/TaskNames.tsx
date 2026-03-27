@@ -21,7 +21,7 @@ import type { VirtualItem } from "@tanstack/react-virtual";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { FiChevronUp } from "react-icons/fi";
-import { Link as RouterLink, useParams, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useParams, useSearchParams, useLocation } from "react-router-dom";
 
 import { TaskName } from "src/components/TaskName";
 import { useHover } from "src/context/hover";
@@ -34,13 +34,14 @@ type Props = {
   readonly nodes: Array<GridTask>;
   readonly onRowClick?: () => void;
   readonly virtualItems?: Array<VirtualItem>;
+  readonly isSimulating?: boolean;
 };
 
 const ROW_HEIGHT = 20;
 
 const indent = (depth: number) => `${depth * 0.75 + 0.5}rem`;
 
-export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
+export const TaskNames = ({ nodes, onRowClick, virtualItems, isSimulating = false}: Props) => {
   const { t: translate } = useTranslation("dag");
   const { hoveredTaskId, setHoveredTaskId } = useHover();
   const { toggleGroupId } = useOpenGroups();
@@ -73,6 +74,7 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
   const itemsToRender =
     virtualItems ?? nodes.map((_, index) => ({ index, size: ROW_HEIGHT, start: index * ROW_HEIGHT }));
 
+
   return (
     <>
       {itemsToRender.map((virtualItem) => {
@@ -84,6 +86,9 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
 
         const isSelected = node.id === taskId || node.id === groupId;
         const isHovered = hoveredTaskId === node.id;
+
+        // Build base path with simulation prefix if needed
+        const basePath = isSimulating ? `/dags/${dagId}/simulation` : `/dags/${dagId}`;
 
         return (
           <Box
@@ -111,10 +116,7 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
                   onClick={onRowClick}
                   replace
                   style={{ outline: "none" }}
-                  to={{
-                    pathname: `/dags/${dagId}/tasks/group/${node.id}`,
-                    search,
-                  }}
+                  to={isSimulating ? `/dags/${dagId}/simulation/tasks/group/${node.id}` : `/dags/${dagId}/tasks/group/${node.id}`}
                 >
                   <Flex alignItems="center" width="100%">
                     <TaskName
@@ -153,10 +155,7 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
                 <RouterLink
                   onClick={onRowClick}
                   replace
-                  to={{
-                    pathname: `/dags/${dagId}/tasks/${node.id}`,
-                    search,
-                  }}
+                  to={isSimulating ? `/dags/${dagId}/simulation/tasks/${node.id}` : `/dags/${dagId}/tasks/${node.id}`}
                 >
                   <TaskName
                     fontSize="sm"

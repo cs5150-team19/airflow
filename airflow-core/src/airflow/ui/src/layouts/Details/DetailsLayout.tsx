@@ -18,12 +18,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, HStack, Flex, useDisclosure, IconButton, Button } from "@chakra-ui/react";
+import { Box, HStack, Flex, useDisclosure, IconButton, Button} from "@chakra-ui/react";
 import { useReactFlow } from "@xyflow/react";
 import { useRef, useState } from "react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FiPlay } from "react-icons/fi";
 import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { LuFileWarning } from "react-icons/lu";
 import {
@@ -32,8 +31,9 @@ import {
   PanelGroup,
   PanelResizeHandle,
 } from "react-resizable-panels";
-import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
+import { Outlet, useNavigate , useParams , useLocation } from "react-router-dom";
 import { useLocalStorage } from "usehooks-ts";
+import { useMemo } from 'react';
 
 import { useDagServiceGetDag, useDagWarningServiceListDagWarnings } from "openapi/queries";
 import type { DagRunState, DagRunType } from "openapi/requests/types.gen";
@@ -77,7 +77,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
   const { dagId = "", runId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const isSimulating = location.pathname.endsWith("/simulation");
+  const isSimulating = location.pathname.includes("/simulation");
 
   const { data: dag } = useDagServiceGetDag({ dagId });
   const [defaultDagView] = useLocalStorage<"graph" | "grid">(DEFAULT_DAG_VIEW_KEY, "grid");
@@ -109,6 +109,13 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const { i18n } = useTranslation();
   const direction = i18n.dir();
+
+  const filteredTabs = useMemo(() => {
+    if (isSimulating) {
+      return tabs.filter(tab => tab.value !== "events" && tab.value !== "backfills" && tab.value !== "calendar");
+    }
+    return tabs;
+  }, [tabs, isSimulating]);
 
   return (
     <HoverProvider>
@@ -215,6 +222,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
                   <HStack alignItems="flex-start" gap={0}>
                     <Grid
                       dagRunState={dagRunStateFilter}
+                      isSimulating={isSimulating}
                       limit={limit}
                       runType={runTypeFilter}
                       showGantt={Boolean(runId) && showGantt}
@@ -309,7 +317,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
                       </>
                     ) : undefined}
                     <ProgressBar size="xs" visibility={isLoading ? "visible" : "hidden"} />
-                    <NavTabs tabs={tabs} />
+                    <NavTabs tabs={filteredTabs} isSimulating={isSimulating} />
                     <Box flexGrow={1} overflow="auto" px={2}>
                       <Outlet />
                     </Box>

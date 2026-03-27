@@ -23,7 +23,7 @@ import dayjsDuration from "dayjs/plugin/duration";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FiChevronsRight } from "react-icons/fi";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import type { DagRunState, DagRunType, GridRunsResponse } from "openapi/requests";
 import type { VersionIndicatorOptions } from "src/constants/showVersionIndicatorOptions";
@@ -51,6 +51,7 @@ dayjs.extend(dayjsDuration);
 
 type Props = {
   readonly dagRunState?: DagRunState | undefined;
+  readonly isSimulating?: boolean;
   readonly limit: number;
   readonly runType?: DagRunType | undefined;
   readonly showGantt?: boolean;
@@ -60,6 +61,7 @@ type Props = {
 
 export const Grid = ({
   dagRunState,
+  isSimulating = false,
   limit,
   runType,
   showGantt,
@@ -74,6 +76,10 @@ export const Grid = ({
   const { openGroupIds, toggleGroupId } = useOpenGroups();
   const { dagId = "", runId = "" } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  // The prop is set by DetailsLayout; fall back to URL detection so Grid
+  // works correctly regardless of which parent layout renders it.
+  const isSimulatingResolved = isSimulating || location.pathname.includes("/simulation");
 
   const filterRoot = searchParams.get("root") ?? undefined;
   const includeUpstream = searchParams.get("upstream") === "true";
@@ -193,7 +199,7 @@ export const Grid = ({
                 ))}
               </Flex>
               {selectedIsVisible === undefined || !selectedIsVisible ? undefined : (
-                <Link to={`/dags/${dagId}`}>
+                <Link to={isSimulatingResolved ? `/dags/${dagId}/simulation` : `/dags/${dagId}`}>
                   <IconButton
                     aria-label={translate("grid.buttons.resetToLatest")}
                     height={`${GRID_HEADER_HEIGHT_PX - 2}px`}
@@ -215,12 +221,13 @@ export const Grid = ({
         {/* Grid body */}
         <Flex height={`${rowVirtualizer.getTotalSize()}px`} position="relative">
           <Box bg="bg" flexGrow={1} flexShrink={0} left={0} minWidth="200px" position="sticky" zIndex={1}>
-            <TaskNames nodes={flatNodes} onRowClick={handleRowClick} virtualItems={virtualItems} />
+            <TaskNames isSimulating={isSimulatingResolved} nodes={flatNodes} onRowClick={handleRowClick} virtualItems={virtualItems} />
           </Box>
           <Flex flexDirection="row-reverse" flexShrink={0}>
             {gridRuns?.map((dr: GridRunsResponse) => (
               <TaskInstancesColumn
                 key={dr.run_id}
+                isSimulating={isSimulatingResolved}
                 nodes={flatNodes}
                 onCellClick={handleCellClick}
                 run={dr}
