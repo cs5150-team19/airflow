@@ -22,7 +22,7 @@ import { Flex, HStack, Link, Text } from "@chakra-ui/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { Link as RouterLink, useParams, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useParams, useSearchParams, useLocation } from "react-router-dom";
 
 import { useDagRunServiceGetDagRuns } from "openapi/queries";
 import type { DAGRunResponse } from "openapi/requests/types.gen";
@@ -193,6 +193,8 @@ export const DagRuns = () => {
   const { t: translate } = useTranslation();
   const { dagId } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const isSimulating = location.pathname.includes("/simulation");
 
   const { setTableURLState, tableURLState } = useTableURLState({
     columnVisibility: {
@@ -248,7 +250,7 @@ export const DagRuns = () => {
       runAfterGte: runAfterGte ?? undefined,
       runAfterLte: runAfterLte ?? undefined,
       runIdPattern: filteredRunIdPattern ?? undefined,
-      runType: filteredType === null ? undefined : [filteredType],
+      runType: isSimulating ? ["simulation"] : (filteredType === null ? undefined : [filteredType]),
       startDateGte: startDateGte ?? undefined,
       startDateLte: startDateLte ?? undefined,
       state: filteredState === null ? undefined : [filteredState],
@@ -263,20 +265,27 @@ export const DagRuns = () => {
   );
 
   const columns = runColumns(translate, dagId);
+  const showEmptyPlaceholder = isSimulating && (!data?.dag_runs || data.dag_runs.length === 0);
 
   return (
     <>
       <DagRunsFilters dagId={dagId} />
-      <DataTable
-        columns={columns}
-        data={data?.dag_runs ?? []}
-        errorMessage={<ErrorAlert error={error} />}
-        initialState={tableURLState}
-        isLoading={isLoading}
-        modelName="common:dagRun"
-        onStateChange={setTableURLState}
-        total={data?.total_entries}
-      />
+      {showEmptyPlaceholder ? (
+        <Text p={4} textAlign="center" color="fg.muted">
+          No simulated runs yet. Trigger a simulation to see runs.
+        </Text>
+      ) : (
+        <DataTable
+          columns={columns}
+          data={data?.dag_runs ?? []}
+          errorMessage={<ErrorAlert error={error} />}
+          initialState={tableURLState}
+          isLoading={isLoading}
+          modelName="common:dagRun"
+          onStateChange={setTableURLState}
+          total={data?.total_entries}
+        />
+      )}
     </>
   );
 };
