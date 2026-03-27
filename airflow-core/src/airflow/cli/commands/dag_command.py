@@ -737,3 +737,95 @@ def dag_reserialize(args, session: Session = NEW_SESSION) -> None:
         bundle.initialize()
         dag_bag = BundleDagBag(bundle.path, bundle_path=bundle.path, bundle_name=bundle.name)
         sync_bag_to_db(dag_bag, bundle.name, bundle_version=bundle.get_current_version(), session=session)
+
+
+def _serialize_simulation_task_estimate(task_estimate) -> dict[str, str | int | float]:
+    """Convert a task simulation estimate into a JSON-serializable payload."""
+    return {
+        "task_id": task_estimate.task_id,
+        "operator_type": task_estimate.operator_type,
+        "estimated_seconds": task_estimate.estimated_seconds,
+        "confidence": task_estimate.confidence,
+    }
+
+
+def _serialize_dag_simulation_result(simulation_result) -> dict[str, object]:
+    """Convert a DAG simulation result into a CLI payload."""
+    return {
+        "dag_id": simulation_result.dag_id,
+        "predicted_outcome": simulation_result.predicted_outcome.value,
+        "total_task_seconds": simulation_result.total_task_seconds,
+        "task_estimates": [
+            _serialize_simulation_task_estimate(task_estimate)
+            for task_estimate in simulation_result.task_estimates
+        ],
+    }
+
+
+def _render_dag_simulation_result(result: dict[str, object], *, output: str) -> None:
+    """Render DAG simulation results to the terminal."""
+    console = AirflowConsole()
+    if output == "json":
+        console.print_as_json(result)
+        return
+    if output == "yaml":
+        console.print_as_yaml(result)
+        return
+
+    print("Simulation summary:")
+    console.print_as(
+        data=[
+            {
+                "dag_id": result["dag_id"],
+                "predicted_outcome": result["predicted_outcome"],
+                "total_task_seconds": result["total_task_seconds"],
+            }
+        ],
+        output=output,
+    )
+    print()
+    print("Task estimates:")
+    console.print_as(data=cast(list[dict[str, str | int | float]], result["task_estimates"]), output=output)
+
+
+def _write_dag_simulation_result(result: dict[str, object], output_file: str) -> None:
+    """Write DAG simulation results to a JSON file."""
+    with open(output_file, "w", encoding="utf-8") as file_handle:
+        json.dump(result, file_handle, indent=2, sort_keys=True)
+        file_handle.write("\n")
+    print(f"File {output_file} saved")
+
+
+@cli_utils.action_cli
+@providers_configuration_loaded
+def dag_simulate(args) -> None:
+    """Simulate a DAG run and report estimated task runtimes."""
+    from airflow.simulation.predictor_interface import DeterministicPredictor
+
+    dag = get_bagged_dag(
+        bundle_names=getattr(args, "bundle_name", None),
+        dag_id=args.dag_id,
+        dagfile_path=getattr(args, "dagfile_path", None),
+    )
+    if not dag:
+        raise AirflowException(
+            f"Dag {args.dag_id!r} could not be found; either it does not exist or it failed to parse."
+        )
+
+    predictor = DeterministicPredictor()
+    simulation_result = predictor.estimate_dag(
+        dag_id=dag.dag_id,
+        tasks=[
+            {
+                "task_id": task.task_id,
+                "operator_type": getattr(task, "task_type", type(task).__name__),
+            }
+            for task in dag.tasks
+        ],
+    )
+    serialized_result = _serialize_dag_simulation_result(simulation_result)
+
+    _render_dag_simulation_result(serialized_result, output=getattr(args, "output", "table"))
+
+    if output_file := getattr(args, "output_file", None):
+        _write_dag_simulation_result(serialized_result, output_file)

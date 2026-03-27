@@ -25,10 +25,6 @@ if TYPE_CHECKING:
 class SimulationExecutor(BaseExecutor):
     """
     Executor that simulates task completion instead of running real work.
-
-    The executor is intentionally side-effect free: it never launches a worker,
-    imports user task code, or executes callbacks. Workloads are converted into
-    immediate in-memory executor events that the scheduler can consume.
     """
 
     is_local = True

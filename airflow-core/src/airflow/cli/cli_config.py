@@ -2136,3 +2136,35 @@ dag_cli_commands: list[CLICommand] = [
     ),
 ]
 DAG_CLI_DICT: dict[str, CLICommand] = {sp.name: sp for sp in dag_cli_commands}
+
+
+ARG_DAG_SIMULATE_OUTPUT_FILE = Arg(
+    ("--output-file",),
+    help="Save the DAG simulation results as JSON to the given file.",
+    type=str,
+)
+
+SIMULATE_DAG_COMMAND = ActionCommand(
+    name="simulate",
+    help="Simulate a DAG run and show predicted task runtimes",
+    description=(
+        "Simulate a DAG run for the given DAG and report predicted task runtimes and "
+        "overall outcome. Use --output-file to save the full simulation payload as JSON."
+    ),
+    func=lazy_load_command("airflow.cli.commands.dag_command.dag_simulate"),
+    args=(
+        ARG_DAG_ID,
+        ARG_OUTPUT,
+        ARG_DAG_SIMULATE_OUTPUT_FILE,
+        ARG_VERBOSE,
+    ),
+)
+
+DAGS_COMMANDS = (*DAGS_COMMANDS, SIMULATE_DAG_COMMAND)
+
+core_commands = [
+    GroupCommand(name="dags", help="Manage DAGs", subcommands=DAGS_COMMANDS)
+    if isinstance(command, GroupCommand) and command.name == "dags"
+    else command
+    for command in core_commands
+]

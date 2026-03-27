@@ -1,0 +1,21 @@
+2026-03-27T16:27:57.504796Z DEBUG prek: 0.3.8 (bb412c080 2026-03-23)
+2026-03-27T16:27:57.504984Z DEBUG Args: ["C:\\Users\\Lukes\\.local\\bin\\prek.exe", "airflow-core", "check-airflow-k8s-not-used", "--files", "airflow-core/src/airflow/cli/commands/dag_command.py", "--log-file", "prek-debug.log", "-v"]
+2026-03-27T16:27:57.548685Z TRACE get_root: close time.busy=43.5ms time.idle=7.80µs
+2026-03-27T16:27:57.548813Z DEBUG Git root: C:/Users/Lukes/Documents/cs5150/Airflow Repo/airflow
+2026-03-27T16:27:57.548965Z DEBUG Found workspace root at `C:\Users\Lukes\Documents\cs5150\Airflow Repo\airflow`
+2026-03-27T16:27:57.548996Z TRACE Include selectors: `airflow-core, check-airflow-k8s-not-used`
+2026-03-27T16:27:57.549181Z TRACE Skip selectors: ``
+2026-03-27T16:27:57.549779Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loaded workspace from cache
+2026-03-27T16:27:57.549813Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=.pre-commit-config.yaml
+2026-03-27T16:27:57.564995Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=airflow-core\.pre-commit-config.yaml
+2026-03-27T16:27:57.570892Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=airflow-ctl-tests\.pre-commit-config.yaml
+2026-03-27T16:27:57.571223Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=airflow-ctl\.pre-commit-config.yaml
+2026-03-27T16:27:57.571663Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=task-sdk\.pre-commit-config.yaml
+2026-03-27T16:27:57.572457Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=chart\.pre-commit-config.yaml
+2026-03-27T16:27:57.573241Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=providers\.pre-commit-config.yaml
+2026-03-27T16:27:57.575720Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=go-sdk\.pre-commit-config.yaml
+2026-03-27T16:27:57.576337Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=providers\fab\.pre-commit-config.yaml
+2026-03-27T16:27:57.576749Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=providers\common\compat\.pre-commit-config.yaml
+2026-03-27T16:27:57.576891Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=providers\edge3\.pre-commit-config.yaml
+2026-03-27T16:27:57.577290Z DEBUG discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: Loading project configuration path=providers\keycloak\.pre-commit-config.yaml
+2026-03-27T16:27:57.577726Z TRACE discover{root="C:\\Users\\Lukes\\Documents\\cs5150\\Airflow Repo\\airflow" config=None refresh=false}: close time.busy=28.5ms time.idle=3.90µs
