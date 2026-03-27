@@ -132,3 +132,84 @@ def get_historical_runtimes(
         )
         for row in rows
     ]
+
+
+@provide_session
+def get_historical_runtimes_by_operator(
+    operator_type: str,
+    *,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    states: list[str] | None = None,
+    exclude_simulations: bool = True,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    session: Session = NEW_SESSION,
+) -> list[HistoricalRuntime]:
+    """Retrieve historical runtimes for all tasks using a given operator type.
+
+    This enables cross-DAG estimates for new tasks that have no history of
+    their own but share an operator type with tasks that do.
+
+    Args:
+        operator_type: The operator class name (e.g. ``"PythonOperator"``).
+        start_date: Only include runs that started on or after this datetime.
+        end_date: Only include runs that started on or before this datetime.
+        states: Task states to include. Defaults to ``["success"]`` when *None*.
+        exclude_simulations: When *True*, exclude rows where ``is_simulation`` is set.
+        limit: Maximum number of records to return. Capped at :data:`DEFAULT_LIMIT`.
+        offset: Number of records to skip for pagination.
+        session: SQLAlchemy session (provided by ``@provide_session``).
+
+    Returns:
+        A list of :class:`HistoricalRuntime` records ordered by ``start_date``
+        descending (most recent first).  Returns an empty list when no matching
+        records exist.
+    """
+    if states is None:
+        states = [TaskInstanceState.SUCCESS.value]
+
+    limit = min(max(limit, 1), DEFAULT_LIMIT)
+    offset = max(offset, 0)
+
+    stmt = (
+        select(
+            TaskInstance.run_id,
+            TaskInstance.duration,
+            TaskInstance.start_date,
+            TaskInstance.end_date,
+            TaskInstance.state,
+        )
+        .where(
+            TaskInstance.operator == operator_type,
+            TaskInstance.state.in_(states),
+        )
+    )
+
+    if start_date is not None:
+        stmt = stmt.where(TaskInstance.start_date >= start_date)
+
+    if end_date is not None:
+        stmt = stmt.where(TaskInstance.start_date <= end_date)
+
+    if exclude_simulations and hasattr(TaskInstance, "is_simulation"):
+        stmt = stmt.where(TaskInstance.is_simulation.is_(False))
+
+    stmt = (
+        stmt.order_by(TaskInstance.start_date.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    rows = session.execute(stmt).all()
+
+    return [
+        HistoricalRuntime(
+            run_id=row.run_id,
+            duration=row.duration,
+            start_date=row.start_date,
+            end_date=row.end_date,
+            state=row.state,
+        )
+        for row in rows
+    ]

@@ -22,17 +22,23 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from airflow.simulation.data.historical_data_extractor import get_historical_runtimes
+from airflow.simulation.data.historical_data_extractor import (
+    get_historical_runtimes,
+    get_historical_runtimes_by_operator,
+)
 from airflow.simulation.predictor_interface import (
     DeterministicPredictor,
     PredictorInterface,
     TaskRuntimeEstimate,
 )
 
-# Minimum confidence assigned to historical estimates.
+# Minimum confidence assigned to exact-match historical estimates.
 _HISTORICAL_BASE_CONFIDENCE: float = 0.7
 # Maximum confidence ceiling.
 _HISTORICAL_MAX_CONFIDENCE: float = 0.95
+# Confidence range for operator-type cross-DAG estimates (lower than exact match).
+_OPERATOR_BASE_CONFIDENCE: float = 0.55
+_OPERATOR_MAX_CONFIDENCE: float = 0.75
 # Default minimum number of runs required before using historical data.
 _DEFAULT_MIN_RUNS: int = 3
 
@@ -93,19 +99,22 @@ def _aggregate(durations: list[float], method: AggregationMethod) -> float:
     return statistics.median(durations)
 
 
-def _compute_confidence(sample_size: int) -> float:
+def _compute_confidence(
+    sample_size: int,
+    base: float = _HISTORICAL_BASE_CONFIDENCE,
+    ceiling: float = _HISTORICAL_MAX_CONFIDENCE,
+) -> float:
     """Scale confidence based on how many data points were used.
 
-    More data points → higher confidence, capped at
-    :data:`_HISTORICAL_MAX_CONFIDENCE`.
+    More data points → higher confidence, capped at *ceiling*.
+
+    Args:
+        sample_size: Number of data points used for the estimate.
+        base: Starting confidence at *_DEFAULT_MIN_RUNS* samples.
+        ceiling: Maximum confidence value.
     """
-    # Simple logarithmic scaling: confidence grows with more samples but
-    # quickly saturates.  At 3 samples we start at _HISTORICAL_BASE_CONFIDENCE
-    # and approach _HISTORICAL_MAX_CONFIDENCE around 50+ samples.
-    bonus = min((sample_size - _DEFAULT_MIN_RUNS) / 50.0, 1.0) * (
-        _HISTORICAL_MAX_CONFIDENCE - _HISTORICAL_BASE_CONFIDENCE
-    )
-    return min(_HISTORICAL_BASE_CONFIDENCE + max(bonus, 0.0), _HISTORICAL_MAX_CONFIDENCE)
+    bonus = min((sample_size - _DEFAULT_MIN_RUNS) / 50.0, 1.0) * (ceiling - base)
+    return min(base + max(bonus, 0.0), ceiling)
 
 
 class HistoricalPredictor(PredictorInterface):
@@ -154,29 +163,61 @@ class HistoricalPredictor(PredictorInterface):
         if self.lookback_days is not None:
             start_date = datetime.now(tz=timezone.utc) - timedelta(days=self.lookback_days)
 
+        # --- Level 1: exact match (same dag_id + task_id) ---
         runtimes = get_historical_runtimes(
             dag_id,
             task_id,
             start_date=start_date,
             limit=self.max_runs,
         )
+        durations = self._extract_durations(runtimes)
 
+        if durations is not None:
+            return TaskRuntimeEstimate(
+                task_id=task_id,
+                operator_type=operator_type,
+                estimated_seconds=int(round(_aggregate(durations, self.aggregation))),
+                confidence=_compute_confidence(len(durations)),
+            )
+
+        # --- Level 2: operator-type match (same operator across all DAGs) ---
+        operator_runtimes = get_historical_runtimes_by_operator(
+            operator_type,
+            start_date=start_date,
+            limit=self.max_runs,
+        )
+        operator_durations = self._extract_durations(operator_runtimes)
+
+        if operator_durations is not None:
+            return TaskRuntimeEstimate(
+                task_id=task_id,
+                operator_type=operator_type,
+                estimated_seconds=int(round(_aggregate(operator_durations, self.aggregation))),
+                confidence=_compute_confidence(
+                    len(operator_durations),
+                    base=_OPERATOR_BASE_CONFIDENCE,
+                    ceiling=_OPERATOR_MAX_CONFIDENCE,
+                ),
+            )
+
+        # --- Level 3: hardcoded heuristic ---
+        return self._fallback.estimate_task(task_id, operator_type, context)
+
+    def _extract_durations(self, runtimes: list) -> list[float] | None:
+        """Extract valid durations and apply outlier filtering.
+
+        Returns a list of durations if enough data points remain after
+        filtering, or ``None`` to signal that the caller should try the
+        next fallback level.
+        """
         durations = [r.duration for r in runtimes if r.duration is not None]
 
         if len(durations) < self.min_runs:
-            return self._fallback.estimate_task(task_id, operator_type, context)
+            return None
 
         if self.filter_outliers_enabled:
             durations = _filter_outliers(durations)
-            # After filtering we may have dropped below min_runs.
             if len(durations) < self.min_runs:
-                return self._fallback.estimate_task(task_id, operator_type, context)
+                return None
 
-        estimated_seconds = _aggregate(durations, self.aggregation)
-
-        return TaskRuntimeEstimate(
-            task_id=task_id,
-            operator_type=operator_type,
-            estimated_seconds=int(round(estimated_seconds)),
-            confidence=_compute_confidence(len(durations)),
-        )
+        return durations
