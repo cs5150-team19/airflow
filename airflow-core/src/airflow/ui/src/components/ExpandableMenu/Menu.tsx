@@ -1,21 +1,29 @@
 import { Box, Button, VStack, Text } from "@chakra-ui/react";
 import { useState } from "react";
 import { MdScience, MdExpandLess, MdExpandMore } from "react-icons/md";
+import { useSearchParams } from "react-router-dom";
 
 // Use the Chakra v3 Checkbox namespace directly
 import { Checkbox as ChakraCheckbox } from "@chakra-ui/react";
+import { getSimulationDisplayOptions } from "src/utils/simulationDisplay";
 
 export const SimulationMenu = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [options, setOptions] = useState({
-    setCriticalPath: false,
-    setDuration: false,
-    setResource: false,
-    setWaitTime: false
-  });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const options = getSimulationDisplayOptions(searchParams);
 
-  const toggle = (key: keyof typeof options) =>
-    setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
+  const toggle = (key: "sim_cp" | "sim_duration" | "sim_resource" | "sim_wait") => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    const isEnabled = nextSearchParams.get(key) === "1";
+
+    if (isEnabled) {
+      nextSearchParams.delete(key);
+    } else {
+      nextSearchParams.set(key, "1");
+    }
+
+    setSearchParams(nextSearchParams, { replace: true });
+  };
 
   return (
     <Box bottom={4} left={14} position="absolute" zIndex={10}>
@@ -36,8 +44,8 @@ export const SimulationMenu = () => {
               </Text>
 
               <ChakraCheckbox.Root
-                checked={options.setCriticalPath}
-                onCheckedChange={() => toggle("setCriticalPath")}
+                checked={options.showCriticalPath}
+                onCheckedChange={() => toggle("sim_cp")}
               >
                 <ChakraCheckbox.HiddenInput />
                 <ChakraCheckbox.Control />
@@ -50,8 +58,8 @@ export const SimulationMenu = () => {
               </ChakraCheckbox.Root>
 
               <ChakraCheckbox.Root
-                checked={options.setDuration}
-                onCheckedChange={() => toggle("setDuration")}
+                checked={options.showDurationBottleneck}
+                onCheckedChange={() => toggle("sim_duration")}
               >
                 <ChakraCheckbox.HiddenInput />
                 <ChakraCheckbox.Control />
@@ -64,8 +72,8 @@ export const SimulationMenu = () => {
               </ChakraCheckbox.Root>
 
               <ChakraCheckbox.Root
-                checked={options.setResource}
-                onCheckedChange={() => toggle("setResource")}
+                checked={options.showResourceBottleneck}
+                onCheckedChange={() => toggle("sim_resource")}
               >
                 <ChakraCheckbox.HiddenInput />
                 <ChakraCheckbox.Control />
@@ -78,8 +86,8 @@ export const SimulationMenu = () => {
               </ChakraCheckbox.Root>
 
               <ChakraCheckbox.Root
-                checked={options.setWaitTime}
-                onCheckedChange={() => toggle("setWaitTime")}
+                checked={options.showWaitTimeBottleneck}
+                onCheckedChange={() => toggle("sim_wait")}
               >
                 <ChakraCheckbox.HiddenInput />
                 <ChakraCheckbox.Control />

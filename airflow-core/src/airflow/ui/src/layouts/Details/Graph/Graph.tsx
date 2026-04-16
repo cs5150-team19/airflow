@@ -36,6 +36,7 @@ import { flattenGraphNodes } from "src/layouts/Details/Grid/utils.ts";
 import { useDependencyGraph } from "src/queries/useDependencyGraph";
 import { useGridTiSummaries } from "src/queries/useGridTISummaries.ts";
 import { getReactFlowThemeStyle } from "src/theme";
+import { getSimulationDisplayOptions, getSimulationTaskDisplayMetadata } from "src/utils/simulationDisplay";
 
 const nodeColor = (
   { data: { depth, height, isOpen, taskInstance, width }, type }: ReactFlowNode<CustomNodeProps>,
@@ -71,6 +72,7 @@ export const Graph = () => {
   const includeDownstream = searchParams.get("downstream") === "true";
   const depthParam = searchParams.get("depth");
   const depth = depthParam !== null && depthParam !== "" ? parseInt(depthParam, 10) : undefined;
+  const simulationDisplayOptions = getSimulationDisplayOptions(searchParams);
 
   const hasActiveFilter = includeUpstream || includeDownstream;
 
@@ -135,16 +137,28 @@ export const Graph = () => {
   });
 
   const { data: gridTISummaries } = useGridTiSummaries({ dagId, runId });
+  const simulationMetadataByTaskId = getSimulationTaskDisplayMetadata(
+    (data?.nodes ?? []).filter((node) => node.type === "task").map((node) => node.id),
+    simulationDisplayOptions,
+    (data?.edges ?? []).map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+    })),
+  );
 
   // Add task instances to the node data but without having to recalculate how the graph is laid out
   const nodes = data?.nodes.map((node) => {
     const taskInstance = gridTISummaries?.task_instances.find((ti) => ti.task_id === node.id);
+    const simulationMetadata = simulationMetadataByTaskId[node.id];
 
     return {
       ...node,
       data: {
         ...node.data,
+        isBottleneck: simulationMetadata?.isBottleneck ?? false,
+        isCriticalPath: simulationMetadata?.isCriticalPath ?? false,
         isSelected: node.id === taskId || node.id === groupId || node.id === `dag:${dagId}`,
+        simulationMetricLabel: simulationMetadata?.metricLabel,
         taskInstance,
       },
     };

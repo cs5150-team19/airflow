@@ -64,6 +64,25 @@ interface SimulationReport {
   sla_misses: SLAMiss[];
 }
 
+const getLatestSimulationId = (dagId: string): string | null => {
+  if (!dagId) {
+    return null;
+  }
+
+  const raw = globalThis.localStorage.getItem(`airflow.latestSimulation.${dagId}`);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { simulationId?: string };
+    return parsed.simulationId ?? null;
+  } catch {
+    return null;
+  }
+};
+
 // --- Placeholder fetch for a specific simulation ---
 const fetchSimulationReport = async (dagId: string, simulationId: string): Promise<SimulationReport> => {
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -105,30 +124,6 @@ const fetchSimulationReport = async (dagId: string, simulationId: string): Promi
   };
 };
 
-// --- Placeholder fetch for the latest simulation (or null if none) ---
-const fetchLatestSimulationReport = async (dagId: string): Promise<SimulationReport | null> => {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  // Simulate that there is a previous simulation for this DAG.
-  // Return null if no simulation ever run.
-  // For demo, we'll return a mock report (or null to test placeholder).
-  // Adjust as needed: if you want to test the "no simulation" state, change to `null`.
-  return {
-    dag_id: dagId,
-    predicted_outcome: "success",
-    total_duration_seconds: 98,
-    total_resource_consumption_cpu: 2.8,
-    total_wait_time_seconds: 35,
-    success_tasks: ["task_a", "task_b", "task_c", "task_d", "task_e", "task_f"],
-    failed_tasks: [],
-    skipped_tasks: ["task_g"],
-    validation_errors: [],
-    dag_structure_issues: [],
-    config_errors: [],
-    resource_limit_warnings: [],
-    sla_misses: [],
-  };
-};
-
 // --- Component ---
 export const Simulation = () => {
   const { dagId = "" } = useParams();
@@ -161,9 +156,16 @@ export const Simulation = () => {
           data = await fetchSimulationReport(dagId, simulationId);
           setHasPreviousSimulation(true);
         } else {
-          // Fetch the latest simulation for this DAG
-          data = await fetchLatestSimulationReport(dagId);
-          setHasPreviousSimulation(!!data);
+          // Fetch the latest known simulation for this DAG, if any.
+          const latestSimulationId = getLatestSimulationId(dagId);
+
+          if (latestSimulationId) {
+            data = await fetchSimulationReport(dagId, latestSimulationId);
+            setHasPreviousSimulation(true);
+          } else {
+            data = null;
+            setHasPreviousSimulation(false);
+          }
         }
 
         if (!cancelled) {

@@ -18,7 +18,7 @@
  */
 import { Center, Flex } from "@chakra-ui/react";
 import { useRef, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 
 import { useContainerWidth } from "src/utils";
 
@@ -30,6 +30,9 @@ type Props = {
 export const NavTabs = ({ tabs }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const containerWidth = useContainerWidth(containerRef);
+  const [searchParams] = useSearchParams();
+  const simulationId = searchParams.get("simulation_id");
+  const search = simulationId === null ? "" : `?${new URLSearchParams({ simulation_id: simulationId }).toString()}`;
 
   return (
     <Flex
@@ -44,7 +47,7 @@ export const NavTabs = ({ tabs }: Props) => {
           end
           key={value}
           title={label}
-          to={value} // relative path – appends to current URL
+          to={{ pathname: value, search }} // preserve simulation context across tabs
         >
           {({ isActive }) => (
             <Center

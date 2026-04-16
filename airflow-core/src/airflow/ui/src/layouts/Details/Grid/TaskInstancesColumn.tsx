@@ -146,11 +146,14 @@ export const TaskInstancesColumn = ({
             <GridTI
               dagId={dagId}
               instance={taskInstance}
+              isBottleneck={Boolean(node.isBottleneck)}
+              isCriticalPath={Boolean(node.isCriticalPath)}
               isGroup={node.isGroup}
               isMapped={node.is_mapped}
               label={node.label}
               onClick={onCellClick}
               runId={run.run_id}
+              simulationMetricLabel={node.simulationMetricLabel}
               taskId={node.id}
               isSimulating={isSimulating}
             />

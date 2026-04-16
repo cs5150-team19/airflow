@@ -32,7 +32,7 @@ import {
 import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams, useLocation, useSearchParams } from "react-router-dom";
 import { FiClock, FiCpu, FiDatabase, FiAlertCircle } from "react-icons/fi";
 
 import { useTaskInstanceServiceGetTaskInstances } from "openapi/queries";
@@ -65,43 +65,72 @@ interface SimulationTaskInstance {
   error?: string;
 }
 
+type LatestSimulationRecord = {
+  simulationId: string;
+  triggeredAt: string;
+};
+
+const getLatestSimulationRecord = (dagId: string): LatestSimulationRecord | null => {
+  if (!dagId) {
+    return null;
+  }
+  const raw = globalThis.localStorage.getItem(`airflow.latestSimulation.${dagId}`);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as LatestSimulationRecord;
+  } catch {
+    return null;
+  }
+};
+
+const hashString = (value: string): number =>
+  value.split("").reduce((accumulator, char) => accumulator + char.charCodeAt(0), 0);
+
+const deriveSimulationResult = (taskId: string, seed: string): SimulationTaskInstance => {
+  const hash = hashString(`${taskId}:${seed}`);
+  const base = dayjs().subtract(hash % 20, "minute");
+  const duration = (hash % 40) + 5;
+  const states: Array<SimulationTaskInstance["status"]> = ["success", "failed", "skipped", "upstream_failed"];
+  const status = states[hash % states.length] ?? "success";
+
+  return {
+    task_id: taskId,
+    status,
+    duration_seconds: duration,
+    end_time: base.add(duration, "second").toISOString(),
+    error: status === "failed" ? "Simulation predicts this task may fail due to input constraints." : undefined,
+    estimated_resource_usage: {
+      space_complexity: hash % 2 === 0 ? "O(1)" : "O(n)",
+      time_complexity: hash % 3 === 0 ? "O(n)" : "O(1)",
+    },
+    input_output: {
+      input_source: "upstream task output",
+      input_type: "json",
+      output_source: status === "failed" ? "none" : "task output",
+      output_type: status === "failed" ? "" : "json",
+    },
+    start_time: base.toISOString(),
+  };
+};
+
 // Placeholder API call – replace with real endpoint later
 const fetchSimulationTaskInstance = async (
   dagId: string,
   taskId: string,
+  simulationId?: string | null,
 ): Promise<SimulationTaskInstance | null> => {
   await new Promise(resolve => setTimeout(resolve, 500));
-  const mockData: Record<string, SimulationTaskInstance> = {
-    print_date: {
-      task_id: "print_date",
-      status: "success",
-      duration_seconds: 5,
-      start_time: "2025-03-27T10:00:00Z",
-      end_time: "2025-03-27T10:00:05Z",
-      estimated_resource_usage: { time_complexity: "O(1)", space_complexity: "O(1)" },
-      input_output: { input_source: "None", input_type: "", output_source: "stdout", output_type: "text" },
-    },
-    sleep: {
-      task_id: "sleep",
-      status: "failed",
-      duration_seconds: 30,
-      start_time: "2025-03-27T10:00:00Z",
-      end_time: "2025-03-27T10:00:30Z",
-      estimated_resource_usage: { time_complexity: "O(1)", space_complexity: "O(1)" },
-      input_output: { input_source: "None", input_type: "", output_source: "None", output_type: "" },
-      error: "Timeout: sleep exceeded limit",
-    },
-    templated: {
-      task_id: "templated",
-      status: "success",
-      duration_seconds: 12,
-      start_time: "2025-03-27T10:00:00Z",
-      end_time: "2025-03-27T10:00:12Z",
-      estimated_resource_usage: { time_complexity: "O(n)", space_complexity: "O(1)" },
-      input_output: { input_source: "template variable", input_type: "string", output_source: "processed template", output_type: "string" },
-    },
-  };
-  return mockData[taskId] ?? null;
+  const latestSimulation = simulationId ?? getLatestSimulationRecord(dagId)?.simulationId;
+
+  if (!latestSimulation) {
+    return null;
+  }
+
+  return deriveSimulationResult(taskId, latestSimulation);
 };
 
 // Helper functions
@@ -122,6 +151,7 @@ const formatTime = (isoString: string): string => {
 export const Overview = () => {
   const { dagId = "", groupId, taskId } = useParams();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const isSimulating = location.pathname.includes("/simulation");
   const { t: translate } = useTranslation("dag");
 
@@ -164,17 +194,35 @@ export const Overview = () => {
   const [simulationTask, setSimulationTask] = useState<SimulationTaskInstance | null>(null);
   const [isLoadingSimulation, setIsLoadingSimulation] = useState(false);
   const taskIdentifier = taskId || groupId;
+  const simulationIdFromQuery = searchParams.get("simulation_id");
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  useEffect(() => {
+    const onSimulationTriggered = (event: Event) => {
+      const simulationEvent = event as CustomEvent<{ dagId: string }>;
+
+      if (simulationEvent.detail?.dagId === dagId) {
+        setRefreshToken((value) => value + 1);
+      }
+    };
+
+    globalThis.addEventListener("airflow:simulation-triggered", onSimulationTriggered);
+
+    return () => {
+      globalThis.removeEventListener("airflow:simulation-triggered", onSimulationTriggered);
+    };
+  }, [dagId]);
 
   useEffect(() => {
     if (isSimulating && dagId && taskIdentifier) {
       setIsLoadingSimulation(true);
-      fetchSimulationTaskInstance(dagId, taskIdentifier)
+      fetchSimulationTaskInstance(dagId, taskIdentifier, simulationIdFromQuery)
         .then(data => setSimulationTask(data))
         .finally(() => setIsLoadingSimulation(false));
     } else if (isSimulating && !taskIdentifier) {
       setSimulationTask(null);
     }
-  }, [isSimulating, dagId, taskIdentifier]);
+  }, [isSimulating, dagId, taskIdentifier, simulationIdFromQuery, refreshToken]);
 
   // ========== Simulation View ==========
   if (isSimulating) {

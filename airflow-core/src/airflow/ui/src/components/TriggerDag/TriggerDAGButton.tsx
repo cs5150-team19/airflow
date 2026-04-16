@@ -64,7 +64,7 @@ export const TriggerDAGButton = ({
     | undefined
   >(undefined);
 
-  const isSimulating = location.pathname.endsWith("/simulation");
+  const isSimulating = location.pathname.includes("/simulation");
 
   // Check if there's a selected DAG Run
   const { data: selectedDagRun } = useDagRunServiceGetDagRun(
@@ -106,6 +106,18 @@ export const TriggerDAGButton = ({
       return;
     }
     const data = (await response.json()) as { simulation_id: string };
+    globalThis.localStorage.setItem(
+      `airflow.latestSimulation.${dagId}`,
+      JSON.stringify({
+        simulationId: data.simulation_id,
+        triggeredAt: new Date().toISOString(),
+      }),
+    );
+    globalThis.dispatchEvent(
+      new CustomEvent("airflow:simulation-triggered", {
+        detail: { dagId, simulationId: data.simulation_id },
+      }),
+    );
     void navigate(`/dags/${dagId}/simulation?simulation_id=${data.simulation_id}`);
   };
 
@@ -135,7 +147,7 @@ export const TriggerDAGButton = ({
             </Menu.Trigger>
           </Tooltip>
           <Menu.Content>
-            <Menu.Item onClick={handleNormalTrigger} value="trigger">
+            <Menu.Item onClick={isSimulating ? handleSimulationTrigger : handleNormalTrigger} value="trigger">
               {translate("triggerDag.button")}
             </Menu.Item>
             <Menu.Item onClick={handleTriggerWithConfig} value="triggerWithConfig">
@@ -182,7 +194,7 @@ export const TriggerDAGButton = ({
             colorPalette="brand"
             data-testid="trigger-dag-button"
             disabled={isManualRunDenied}
-            onClick={onOpen}
+            onClick={isSimulating ? handleSimulationTrigger : onOpen}
             size="md"
             variant={variant}
           >

@@ -32,12 +32,15 @@ export type CustomNodeProps = {
   isGroup?: boolean;
   isMapped?: boolean;
   isOpen?: boolean;
+  isBottleneck?: boolean;
+  isCriticalPath?: boolean;
   isSelected?: boolean;
   label: string;
   operator?: string | null;
   setupTeardownType?: NodeResponse["setup_teardown_type"];
   taskInstance?: LightGridTaskInstanceSummary;
   tooltip?: string | null;
+  simulationMetricLabel?: string;
   type: string;
   width?: number;
 };

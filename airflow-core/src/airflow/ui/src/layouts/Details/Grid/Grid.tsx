@@ -32,6 +32,7 @@ import { NavigationModes, useNavigation } from "src/hooks/navigation";
 import { useGridRuns } from "src/queries/useGridRuns.ts";
 import { useGridStructure } from "src/queries/useGridStructure.ts";
 import { isStatePending } from "src/utils";
+import { getSimulationDisplayOptions, getSimulationTaskDisplayMetadata } from "src/utils/simulationDisplay";
 
 import { Bar } from "./Bar";
 import { DurationAxis } from "./DurationAxis";
@@ -86,6 +87,7 @@ export const Grid = ({
   const includeDownstream = searchParams.get("downstream") === "true";
   const depthParam = searchParams.get("depth");
   const depth = depthParam !== null && depthParam !== "" ? parseInt(depthParam, 10) : undefined;
+  const simulationDisplayOptions = getSimulationDisplayOptions(searchParams);
 
   const { data: gridRuns, isLoading } = useGridRuns({ dagRunState, limit, runType, triggeringUser });
 
@@ -129,7 +131,26 @@ export const Grid = ({
     showVersionIndicatorMode,
   });
 
-  const { flatNodes } = useMemo(() => flattenNodes(dagStructure, openGroupIds), [dagStructure, openGroupIds]);
+  const { flatNodes } = useMemo(() => {
+    const flattened = flattenNodes(dagStructure, openGroupIds);
+    const simulationMetadataByTaskId = getSimulationTaskDisplayMetadata(
+      flattened.flatNodes.filter((node) => !node.isGroup).map((node) => node.id),
+      simulationDisplayOptions,
+    );
+
+    return {
+      flatNodes: flattened.flatNodes.map((node) => {
+        const simulationMetadata = simulationMetadataByTaskId[node.id];
+
+        return {
+          ...node,
+          isBottleneck: simulationMetadata?.isBottleneck ?? false,
+          isCriticalPath: simulationMetadata?.isCriticalPath ?? false,
+          simulationMetricLabel: simulationMetadata?.metricLabel,
+        };
+      }),
+    };
+  }, [dagStructure, openGroupIds, simulationDisplayOptions]);
 
   const { setMode } = useNavigation({
     onToggleGroup: toggleGroupId,

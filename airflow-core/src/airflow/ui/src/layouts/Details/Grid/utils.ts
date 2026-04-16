@@ -20,8 +20,11 @@ import type { GridNodeResponse, NodeResponse } from "openapi/requests/types.gen"
 
 export type GridTask = {
   depth: number;
+  isBottleneck?: boolean;
+  isCriticalPath?: boolean;
   isGroup?: boolean;
   isOpen?: boolean;
+  simulationMetricLabel?: string;
 } & GridNodeResponse;
 
 export const flattenNodes = (
