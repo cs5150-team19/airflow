@@ -2605,6 +2605,81 @@ class TestTaskInstance:
         # the new try_id should be different from what's recorded in tih
         assert tih[0].task_instance_id == try_id
 
+    @pytest.mark.parametrize(
+        ("first_ti", "second_ti"),
+        [
+            pytest.param(
+                ("dag_1", "run_1", "task_1", -1),
+                ("dag_2", "run_1", "task_1", -1),
+                id="tasks_with_different_dags",
+            ),
+            pytest.param(
+                ("dag_1", "run_1", "task_1", -1),
+                ("dag_1", "run_2", "task_1", -1),
+                id="tasks_with_different_runs",
+            ),
+            # There are no cases with equal dag_id/run_id because create_task_instance()
+            # creates a DagRun each time, and DagRun has a unique (dag_id, run_id) constraint.
+        ],
+    )
+    def test_get_task_instance_disambiguates_by_dag_id_and_run_id(
+        self, create_task_instance, session, first_ti, second_ti
+    ):
+        dag_id_1, run_id_1, task_id_1, map_index_1 = first_ti
+        dag_id_2, run_id_2, task_id_2, map_index_2 = second_ti
+
+        ti1 = create_task_instance(
+            dag_id=dag_id_1,
+            run_id=run_id_1,
+            task_id=task_id_1,
+            map_index=map_index_1,
+            session=session,
+        )
+        ti2 = create_task_instance(
+            dag_id=dag_id_2,
+            run_id=run_id_2,
+            task_id=task_id_2,
+            map_index=map_index_2,
+            session=session,
+        )
+
+        # Regression setup for #64957: if dag_id is ignored, this lookup key becomes ambiguous.
+        if dag_id_1 != dag_id_2:
+            ambiguous_count = session.scalar(
+                select(func.count())
+                .select_from(TI)
+                .filter_by(run_id=run_id_1, task_id=task_id_1, map_index=map_index_1)
+            )
+            assert ambiguous_count == 2, "Setup failure: expected two TIs matching without dag_id filter"
+
+        # This case does not target the original regression directly (run_id was already filtered),
+        # but we keep it as defense-in-depth against future changes.
+        found_1 = TI.get_task_instance(
+            dag_id=dag_id_1,
+            run_id=run_id_1,
+            task_id=task_id_1,
+            map_index=map_index_1,
+            session=session,
+        )
+        found_2 = TI.get_task_instance(
+            dag_id=dag_id_2,
+            run_id=run_id_2,
+            task_id=task_id_2,
+            map_index=map_index_2,
+            session=session,
+        )
+
+        assert found_1 is not None
+        assert found_2 is not None
+
+        assert found_1.id == ti1.id
+        assert found_2.id == ti2.id
+
+        # Keep dag_id assertions explicit to document the regression intent (#64957):
+        # get_task_instance() must disambiguate identical run/task/map_index by dag_id.
+        assert found_1.dag_id == dag_id_1
+        assert found_2.dag_id == dag_id_2
+
 
 @pytest.mark.parametrize("pool_override", [None, "test_pool2"])
 @pytest.mark.parametrize("queue_by_policy", [None, "forced_queue"])
@@ -2651,6 +2726,26 @@ def test_refresh_from_task(pool_override, queue_by_policy, monkeypatch):
     ti.max_tries = expected_max_tries
     ti.refresh_from_task(ser_task)
     assert ti.max_tries == expected_max_tries
+
+
+@pytest.mark.parametrize(
+    ("weight_rule", "expected_weight"),
+    [
+        pytest.param("downstream", 10 + 5, id="downstream-sums-descendants"),
+        pytest.param("upstream", 10, id="upstream-no-ancestors"),
+        pytest.param("absolute", 10, id="absolute-self-only"),
+    ],
+)
+def test_refresh_from_task_with_non_serialized_operator(weight_rule, expected_weight):
+    """Regression: TaskInstance must work with non-serialized operators whose weight_rule is a WeightRule enum."""
+    with DAG(dag_id="test_dag"):
+        root = EmptyOperator(task_id="root", priority_weight=10, weight_rule=weight_rule)
+        child = EmptyOperator(task_id="child", priority_weight=5)
+        root >> child
+
+    ti = TI(root, run_id=None, dag_version_id=mock.MagicMock())
+
+    assert ti.priority_weight == expected_weight
 
 
 def test_defer_task_returns_false_when_no_start_from_trigger(create_task_instance):
@@ -2748,6 +2843,67 @@ def test_defer_task_with_trigger_timeout(create_task_instance):
     # Check trigger_timeout is set correctly (within a small tolerance)
     expected_timeout = now + timeout
     assert abs((ti.trigger_timeout - expected_timeout).total_seconds()) < 5
+
+
+@pytest.mark.parametrize(
+    ("initial_state", "initial_try_number", "expected_try_number", "msg"),
+    [
+        (TaskInstanceState.DEFERRED, 1, 2, "try_number should increment if state is not UP_FOR_RESCHEDULE"),
+        (
+            TaskInstanceState.UP_FOR_RESCHEDULE,
+            5,
+            5,
+            "try_number should NOT increment if state is UP_FOR_RESCHEDULE",
+        ),
+    ],
+)
+def test_defer_task_try_number_increment_on_state(
+    create_task_instance, initial_state, initial_try_number, expected_try_number, msg
+):
+    """
+    Test that defer_task increments try_number only if the pre-deferral state is not UP_FOR_RESCHEDULE.
+    """
+    from airflow.triggers.base import StartTriggerArgs
+
+    session = mock.MagicMock()
+
+    ti = create_task_instance(
+        dag_id="test_defer_task_try_number",
+        task_id="test_defer_task_try_number_op",
+        start_from_trigger=True,
+        start_trigger_args=StartTriggerArgs(
+            trigger_cls="trigger_cls",
+            next_method="next_method",
+            trigger_kwargs={},
+        ),
+    )
+    ti.state = initial_state
+    ti.try_number = initial_try_number
+    ti.defer_task(session=session)
+    assert ti.try_number == expected_try_number, msg
+
+
+class TestTaskInstanceRelationships:
+    @pytest.mark.parametrize(
+        "attr",
+        ["rendered_task_instance_fields", "hitl_detail"],
+    )
+    def test_noload_relationships_raise_without_joinedload(self, dag_maker, session, attr):
+        """Accessing lazy='raise' relationships without joinedload should raise."""
+        from sqlalchemy.exc import InvalidRequestError
+
+        with dag_maker("test_dag", session=session):
+            EmptyOperator(task_id="task_1")
+
+        dr = dag_maker.create_dagrun()
+        ti = dr.get_task_instance("task_1")
+        session.merge(ti)
+        session.commit()
+
+        loaded_ti = session.scalar(select(TaskInstance).where(TaskInstance.id == ti.id))
+
+        with pytest.raises(InvalidRequestError):
+            getattr(loaded_ti, attr)
 
 
 class TestTaskInstanceRecordTaskMapXComPush:
