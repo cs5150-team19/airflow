@@ -122,8 +122,8 @@ export type BackfillPostBody = {
     to_date: string;
     run_backwards?: boolean;
     dag_run_conf?: {
-        [key: string]: unknown;
-    };
+    [key: string]: unknown;
+} | null;
     reprocess_behavior?: ReprocessBehavior;
     max_active_runs?: number;
     run_on_latest_version?: boolean;
@@ -401,6 +401,14 @@ export type BulkUpdateAction_VariableBody_ = {
 };
 
 /**
+ * Response for clear dag run dry run, which may contain new tasks without full TaskInstance data.
+ */
+export type ClearTaskInstanceCollectionResponse = {
+    task_instances: Array<(TaskInstanceResponse | NewTaskResponse)>;
+    total_entries: number;
+};
+
+/**
  * Request body for Clear Task Instances endpoint.
  */
 export type ClearTaskInstancesBody = {
@@ -542,6 +550,7 @@ export type DAGDetailsResponse = {
     timetable_summary: string | null;
     timetable_description: string | null;
     timetable_partitioned: boolean;
+    timetable_periodic: boolean;
     tags: Array<DagTagResponse>;
     max_active_tasks: number;
     max_active_runs: number | null;
@@ -578,6 +587,10 @@ export type DAGDetailsResponse = {
 } | null;
     is_favorite?: boolean;
     active_runs_count?: number;
+    /**
+     * Whether this DAG's schedule supports backfilling.
+     */
+    readonly is_backfillable: boolean;
     /**
      * Return file token.
      */
@@ -621,6 +634,7 @@ export type DAGResponse = {
     timetable_summary: string | null;
     timetable_description: string | null;
     timetable_partitioned: boolean;
+    timetable_periodic: boolean;
     tags: Array<DagTagResponse>;
     max_active_tasks: number;
     max_active_runs: number | null;
@@ -634,6 +648,10 @@ export type DAGResponse = {
     allowed_run_types: Array<DagRunType> | null;
     owners: Array<(string)>;
     /**
+     * Whether this DAG's schedule supports backfilling.
+     */
+    readonly is_backfillable: boolean;
+    /**
      * Return file token.
      */
     readonly file_token: string;
@@ -645,6 +663,10 @@ export type DAGResponse = {
 export type DAGRunClearBody = {
     dry_run?: boolean;
     only_failed?: boolean;
+    /**
+     * Only queue newly added tasks in the latest DAG version without clearing existing tasks.
+     */
+    only_new?: boolean;
     /**
      * (Experimental) Run on the latest bundle version of the Dag after clearing the Dag Run.
      */
@@ -818,7 +840,7 @@ export type DagRunTriggeredByType = 'cli' | 'operator' | 'rest_api' | 'ui' | 'te
 /**
  * Class with DagRun types.
  */
-export type DagRunType = 'backfill' | 'scheduled' | 'manual' | 'asset_triggered' | 'asset_materialization';
+export type DagRunType = 'backfill' | 'scheduled' | 'manual' | 'operator_triggered' | 'asset_triggered' | 'asset_materialization';
 
 /**
  * DAG schedule reference serializer for assets.
@@ -1135,6 +1157,30 @@ export type LastAssetEventResponse = {
 };
 
 /**
+ * Materialize asset request.
+ */
+export type MaterializeAssetBody = {
+    dag_run_id?: string | null;
+    data_interval_start?: string | null;
+    data_interval_end?: string | null;
+    logical_date?: string | null;
+    run_after?: string | null;
+    conf?: {
+    [key: string]: unknown;
+} | null;
+    note?: string | null;
+    partition_key?: string | null;
+};
+
+/**
+ * Lightweight response for new tasks that don't have TaskInstances yet.
+ */
+export type NewTaskResponse = {
+    task_id: string;
+    task_display_name: string;
+};
+
+/**
  * Request body for Clear Task Instances endpoint.
  */
 export type PatchTaskInstanceBody = {
@@ -1359,11 +1405,29 @@ export type TaskInletAssetReference = {
 };
 
 /**
- * Task Instance Collection serializer for responses.
+ * Task instance collection response supporting both offset and cursor pagination.
+ *
+ * A single flat model is used instead of a discriminated union
+ * (``Annotated[Offset | Cursor, Field(discriminator=...)]``) because
+ * the OpenAPI ``oneOf`` + ``discriminator`` construct is not handled
+ * correctly by ``@hey-api/openapi-ts`` / ``@7nohe/openapi-react-query-codegen``:
+ * return types degrade to ``unknown`` in JSDoc and can produce
+ * incorrect TypeScript types (see hey-api/openapi-ts#1613, #3270).
  */
 export type TaskInstanceCollectionResponse = {
     task_instances: Array<TaskInstanceResponse>;
-    total_entries: number;
+    /**
+     * Total number of matching items. Populated for offset pagination, ``null`` when using cursor pagination.
+     */
+    total_entries?: number | null;
+    /**
+     * Token pointing to the next page. Populated for cursor pagination, ``null`` when using offset pagination or when there is no next page.
+     */
+    next_cursor?: string | null;
+    /**
+     * Token pointing to the previous page. Populated for cursor pagination, ``null`` when using offset pagination or when on the first page.
+     */
+    previous_cursor?: string | null;
 };
 
 /**
@@ -1887,6 +1951,7 @@ export type DAGWithLatestDagRunsResponse = {
     timetable_summary: string | null;
     timetable_description: string | null;
     timetable_partitioned: boolean;
+    timetable_periodic: boolean;
     tags: Array<DagTagResponse>;
     max_active_tasks: number;
     max_active_runs: number | null;
@@ -1906,6 +1971,10 @@ export type DAGWithLatestDagRunsResponse = {
     pending_actions: Array<HITLDetail>;
     is_favorite: boolean;
     /**
+     * Whether this DAG's schedule supports backfilling.
+     */
+    readonly is_backfillable: boolean;
+    /**
      * Return file token.
      */
     readonly file_token: string;
@@ -1919,6 +1988,28 @@ export type DashboardDagStatsResponse = {
     failed_dag_count: number;
     running_dag_count: number;
     queued_dag_count: number;
+};
+
+/**
+ * DeadlineAlert Collection serializer for responses.
+ */
+export type DeadlineAlertCollectionResponse = {
+    deadline_alerts: Array<DeadlineAlertResponse>;
+    total_entries: number;
+};
+
+/**
+ * DeadlineAlert serializer for responses.
+ */
+export type DeadlineAlertResponse = {
+    id: string;
+    name?: string | null;
+    reference_type: string;
+    /**
+     * Interval in seconds between deadline evaluations.
+     */
+    interval: number;
+    created_at: string;
 };
 
 /**
@@ -1937,8 +2028,10 @@ export type DeadlineResponse = {
     deadline_time: string;
     missed: boolean;
     created_at: string;
+    dag_id: string;
+    dag_run_id: string;
+    alert_id?: string | null;
     alert_name?: string | null;
-    alert_description?: string | null;
 };
 
 /**
@@ -1952,6 +2045,9 @@ export type EdgeResponse = {
     is_source_asset?: boolean | null;
 };
 
+/**
+ * Define a menu item that can be added to the menu by auth managers or plugins.
+ */
 export type ExtraMenuItem = {
     text: string;
     href: string;
@@ -1974,6 +2070,8 @@ export type GanttTaskInstance = {
     task_display_name: string;
     try_number: number;
     state: TaskInstanceState | null;
+    scheduled_dttm: string | null;
+    queued_dttm: string | null;
     start_date: string | null;
     end_date: string | null;
     is_group?: boolean;
@@ -2200,9 +2298,9 @@ export type TeamResponse = {
  * JSON to modify Chakra's theme.
  */
 export type Theme = {
-    tokens: {
-        [key: string]: ThemeColors;
-    };
+    tokens?: {
+    [key: string]: ThemeColors;
+} | null;
     globalCss?: {
     [key: string]: {
         [key: string]: unknown;
@@ -2212,8 +2310,26 @@ export type Theme = {
     icon_dark_mode?: string | null;
 };
 
+/**
+ * Color tokens for the UI theme. All fields are optional; at least one must be provided.
+ */
 export type ThemeColors = {
-    [key: string]: unknown;
+    brand?: {
+    [key: string]: {
+        [key: string]: OklchColor;
+    };
+} | null;
+    gray?: {
+    [key: string]: {
+        [key: string]: OklchColor;
+    };
+} | null;
+    black?: {
+    [key: string]: OklchColor;
+} | null;
+    white?: {
+    [key: string]: OklchColor;
+} | null;
 };
 
 /**
@@ -2305,6 +2421,7 @@ export type CreateAssetEventResponse = AssetEventResponse;
 
 export type MaterializeAssetData = {
     assetId: number;
+    requestBody?: MaterializeAssetBody | null;
 };
 
 export type MaterializeAssetResponse = DAGRunResponse;
@@ -2521,11 +2638,15 @@ export type ClearDagRunData = {
     requestBody: DAGRunClearBody;
 };
 
-export type ClearDagRunResponse = TaskInstanceCollectionResponse | DAGRunResponse;
+export type ClearDagRunResponse = ClearTaskInstanceCollectionResponse | DAGRunResponse;
 
 export type GetDagRunsData = {
     bundleVersion?: string | null;
     confContains?: string;
+    /**
+     * Filter by consuming asset name or URI using pattern matching
+     */
+    consumingAssetPattern?: string | null;
     dagId: string;
     /**
      * SQL LIKE expression — use `%` / `_` wildcards (e.g. `%customer_%`). or the pipe `|` operator for OR logic (e.g. `dag1 | dag2`). Regular expressions are **not** supported.
@@ -3023,6 +3144,10 @@ export type PatchTaskInstanceByMapIndexData = {
 export type PatchTaskInstanceByMapIndexResponse = TaskInstanceCollectionResponse;
 
 export type GetTaskInstancesData = {
+    /**
+     * Cursor for keyset-based pagination. Pass an empty string for the first page, then use ``next_cursor`` from the response. When ``cursor`` is provided, ``offset`` is ignored.
+     */
+    cursor?: string | null;
     dagId: string;
     /**
      * SQL LIKE expression — use `%` / `_` wildcards (e.g. `%customer_%`). or the pipe `|` operator for OR logic (e.g. `dag1 | dag2`). Regular expressions are **not** supported.
@@ -3407,6 +3532,10 @@ export type GetXcomEntriesData = {
     mapIndex?: number | null;
     mapIndexFilter?: number | null;
     offset?: number;
+    /**
+     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `key, dag_id, run_id, task_id, map_index, timestamp, run_after`
+     */
+    orderBy?: Array<(string)>;
     runAfterGt?: string | null;
     runAfterGte?: string | null;
     runAfterLt?: string | null;
@@ -3579,18 +3708,39 @@ export type HistoricalMetricsResponse = HistoricalMetricDataResponse;
 
 export type DagStatsResponse2 = DashboardDagStatsResponse;
 
-export type GetDagRunDeadlinesData = {
+export type GetDeadlinesData = {
     dagId: string;
     dagRunId: string;
+    deadlineTimeGt?: string | null;
+    deadlineTimeGte?: string | null;
+    deadlineTimeLt?: string | null;
+    deadlineTimeLte?: string | null;
+    lastUpdatedAtGt?: string | null;
+    lastUpdatedAtGte?: string | null;
+    lastUpdatedAtLt?: string | null;
+    lastUpdatedAtLte?: string | null;
     limit?: number;
+    missed?: boolean | null;
     offset?: number;
     /**
-     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, deadline_time, created_at, alert_name`
+     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, deadline_time, created_at, last_updated_at, missed, dag_id, dag_run_id, alert_name`
      */
     orderBy?: Array<(string)>;
 };
 
-export type GetDagRunDeadlinesResponse = DeadlineCollectionResponse;
+export type GetDeadlinesResponse = DeadlineCollectionResponse;
+
+export type GetDagDeadlineAlertsData = {
+    dagId: string;
+    limit?: number;
+    offset?: number;
+    /**
+     * Attributes to order by, multi criteria sort is supported. Prefix with `-` for descending order. Supported attributes: `id, created_at, name, interval`
+     */
+    orderBy?: Array<(string)>;
+};
+
+export type GetDagDeadlineAlertsResponse = DeadlineAlertCollectionResponse;
 
 export type StructureDataData = {
     dagId: string;
@@ -4611,7 +4761,7 @@ export type $OpenApiTs = {
                 /**
                  * Successful Response
                  */
-                200: TaskInstanceCollectionResponse | DAGRunResponse;
+                200: ClearTaskInstanceCollectionResponse | DAGRunResponse;
                 /**
                  * Unauthorized
                  */
@@ -6853,12 +7003,35 @@ export type $OpenApiTs = {
     };
     '/ui/dags/{dag_id}/dagRuns/{dag_run_id}/deadlines': {
         get: {
-            req: GetDagRunDeadlinesData;
+            req: GetDeadlinesData;
             res: {
                 /**
                  * Successful Response
                  */
                 200: DeadlineCollectionResponse;
+                /**
+                 * Bad Request
+                 */
+                400: HTTPExceptionResponse;
+                /**
+                 * Not Found
+                 */
+                404: HTTPExceptionResponse;
+                /**
+                 * Validation Error
+                 */
+                422: HTTPValidationError;
+            };
+        };
+    };
+    '/ui/dags/{dag_id}/deadlineAlerts': {
+        get: {
+            req: GetDagDeadlineAlertsData;
+            res: {
+                /**
+                 * Successful Response
+                 */
+                200: DeadlineAlertCollectionResponse;
                 /**
                  * Not Found
                  */

@@ -40,6 +40,7 @@ from airflow.utils.types import DagRunTriggeredByType, DagRunType
 from tests_common.test_utils.api_fastapi import _check_dag_run_note, _check_last_log
 from tests_common.test_utils.asserts import assert_queries_count
 from tests_common.test_utils.db import (
+    clear_db_assets,
     clear_db_connections,
     clear_db_dag_bundles,
     clear_db_dags,
@@ -130,6 +131,7 @@ def setup(request, dag_maker, session=None):
     clear_db_dag_bundles()
     clear_db_serialized_dags()
     clear_db_logs()
+    clear_db_assets()
 
     if "no_setup" in request.keywords:
         return
@@ -218,6 +220,34 @@ def setup(request, dag_maker, session=None):
     session.merge(ti1)
     session.merge(ti2)
     session.merge(dag_maker.dag_model)
+    session.commit()
+
+    asset1 = AssetModel(name="sales", uri="s3://bucket/sales")
+    asset2 = AssetModel(name="customer", uri="s3://bucket/customer")
+    session.add_all([asset1, asset2])
+    session.flush()
+
+    event1 = AssetEvent(
+        asset_id=asset1.id,
+        source_dag_id="source_dag",
+        source_run_id="source_run",
+        source_task_id="source_task",
+    )
+    event2 = AssetEvent(
+        asset_id=asset2.id,
+        source_dag_id="source_dag",
+        source_run_id="source_run",
+        source_task_id="source_task",
+    )
+    session.add_all([event1, event2])
+    session.flush()
+
+    dag_run1 = session.scalar(select(DagRun).filter(DagRun.id == dag_run1.id))
+    dag_run2 = session.scalar(select(DagRun).filter(DagRun.id == dag_run2.id))
+
+    dag_run1.consumed_asset_events.append(event1)
+    dag_run2.consumed_asset_events.append(event2)
+
     session.commit()
 
 
@@ -632,6 +662,11 @@ class TestGetDagRuns:
             (DAG1_ID, {"run_id_pattern": "run_1"}, [DAG1_RUN1_ID]),
             (DAG1_ID, {"run_id_pattern": "dag_%_1"}, [DAG1_RUN1_ID]),
             ("~", {"run_id_pattern": "dag_run_"}, [DAG1_RUN1_ID, DAG1_RUN2_ID, DAG2_RUN1_ID, DAG2_RUN2_ID]),
+            # Pipe (OR) operator returns results matching either term
+            ("~", {"run_id_pattern": f"{DAG1_RUN1_ID}|{DAG1_RUN2_ID}"}, [DAG1_RUN1_ID, DAG1_RUN2_ID]),
+            # Trailing/leading pipe should not leak into the LIKE pattern
+            ("~", {"run_id_pattern": f"{DAG1_RUN1_ID}|"}, [DAG1_RUN1_ID]),
+            ("~", {"run_id_pattern": f"|{DAG1_RUN1_ID}"}, [DAG1_RUN1_ID]),
             (
                 DAG1_ID,
                 {
@@ -710,6 +745,21 @@ class TestGetDagRuns:
             ),  # Test for debug key
             ("~", {"conf_contains": "version"}, [DAG1_RUN1_ID]),  # Test for the key "version"
             ("~", {"conf_contains": "nonexistent_key"}, []),  # Test for a key that doesn't exist
+            # Test consuming_asset_pattern filter
+            ("~", {"consuming_asset_pattern": "sales"}, [DAG1_RUN1_ID]),  # Filter by asset name
+            ("~", {"consuming_asset_pattern": "s3://bucket/sales"}, [DAG1_RUN1_ID]),  # Filter by asset URI
+            ("~", {"consuming_asset_pattern": "customer"}, [DAG1_RUN2_ID]),  # Filter by another asset
+            (
+                "~",
+                {"consuming_asset_pattern": "s3://bucket/customer"},
+                [DAG1_RUN2_ID],
+            ),  # Filter by customer URI
+            (
+                "~",
+                {"consuming_asset_pattern": "s3://bucket"},
+                [DAG1_RUN1_ID, DAG1_RUN2_ID],
+            ),  # Partial URI match
+            ("~", {"consuming_asset_pattern": "nonexistent_asset"}, []),  # Non-existent asset returns empty
         ],
     )
     @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")
@@ -1533,6 +1583,90 @@ class TestClearDagRun:
         assert body["detail"][0]["msg"] == "Field required"
         assert body["detail"][0]["loc"][0] == "body"
 
+    @mock.patch("airflow.serialization.definitions.dag.SerializedDAG.clear")
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")
+    def test_clear_dag_run_only_new_dry_run(self, mock_clear, test_client, session):
+        """Test that only_new dry_run returns placeholder task instances for new tasks."""
+        mock_clear.return_value = {"new_task_1", "new_task_2", "new_task_3"}
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns/{DAG1_RUN1_ID}/clear",
+            json={"dry_run": True, "only_new": True},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total_entries"] == 3
+        # Verify new tasks are returned with correct task_ids in task_instances
+        task_ids = sorted(t["task_id"] for t in body["task_instances"])
+        assert task_ids == ["new_task_1", "new_task_2", "new_task_3"]
+        # Verify task_display_name defaults to task_id
+        for task in body["task_instances"]:
+            assert task["task_display_name"] == task["task_id"]
+        mock_clear.assert_called_once_with(
+            run_id=DAG1_RUN1_ID,
+            task_ids=None,
+            only_new=True,
+            only_failed=False,
+            run_on_latest_version=False,
+            dry_run=True,
+            session=mock.ANY,
+        )
+        logs = session.scalar(
+            select(func.count())
+            .select_from(Log)
+            .where(Log.dag_id == DAG1_ID, Log.run_id == DAG1_RUN1_ID, Log.event == "clear_dag_run")
+        )
+        assert logs == 0
+
+    @mock.patch("airflow.serialization.definitions.dag.SerializedDAG.clear")
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")
+    def test_clear_dag_run_only_new_dry_run_no_new_tasks(self, mock_clear, test_client, session):
+        """Test that only_new dry_run returns 0 total_entries when there are no new tasks."""
+        mock_clear.return_value = set()
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns/{DAG1_RUN1_ID}/clear",
+            json={"dry_run": True, "only_new": True},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["task_instances"] == []
+        assert body["total_entries"] == 0
+
+    @mock.patch("airflow.serialization.definitions.dag.SerializedDAG.clear")
+    @pytest.mark.usefixtures("configure_git_connection_for_dag_bundle")
+    def test_clear_dag_run_only_new_non_dry_run(self, mock_clear, test_client, session):
+        """Test that only_new non-dry_run clears and returns a DAGRunResponse."""
+        mock_clear.return_value = 2
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns/{DAG1_RUN1_ID}/clear",
+            json={"dry_run": False, "only_new": True},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["dag_id"] == DAG1_ID
+        assert body["dag_run_id"] == DAG1_RUN1_ID
+        mock_clear.assert_called_once_with(
+            run_id=DAG1_RUN1_ID,
+            task_ids=None,
+            only_new=True,
+            only_failed=False,
+            run_on_latest_version=False,
+            session=mock.ANY,
+        )
+        _check_last_log(
+            session,
+            dag_id=DAG1_ID,
+            event="clear_dag_run",
+            logical_date=None,
+        )
+
+    def test_clear_dag_run_only_new_and_only_failed_mutually_exclusive(self, test_client):
+        """Test that only_new and only_failed cannot both be True."""
+        response = test_client.post(
+            f"/dags/{DAG1_ID}/dagRuns/{DAG1_RUN1_ID}/clear",
+            json={"dry_run": True, "only_new": True, "only_failed": True},
+        )
+        assert response.status_code == 422
+
 
 class TestTriggerDagRun:
     def _dags_for_trigger_tests(self, session=None):
@@ -2079,3 +2213,35 @@ class TestWaitDagRun:
         assert response.status_code == 200
         data = response.json()
         assert data == {"state": DagRunState.SUCCESS, "results": {"task_1": '"result_1"'}}
+
+    def test_should_respond_403_when_user_lacks_xcom_permission(self, test_client):
+        from airflow.api_fastapi.auth.managers.models.resource_details import DagAccessEntity, DagDetails
+
+        with mock.patch(
+            "airflow.api_fastapi.core_api.routes.public.dag_run.get_auth_manager",
+            autospec=True,
+        ) as mock_get_auth_manager:
+            mock_get_auth_manager.return_value.is_authorized_dag.return_value = False
+
+            response = test_client.get(
+                f"/dags/{DAG1_ID}/dagRuns/{DAG1_RUN1_ID}/wait",
+                params={"interval": "1", "result": "task_1"},
+            )
+
+            assert response.status_code == 403
+            mock_get_auth_manager.return_value.is_authorized_dag.assert_called_once_with(
+                method="GET",
+                access_entity=DagAccessEntity.XCOM,
+                details=DagDetails(id=DAG1_ID),
+                user=mock.ANY,
+            )
+
+    def test_should_respond_200_without_result_when_user_lacks_xcom_permission(self, test_client):
+        """Waiting without result parameter should not require XCom permissions."""
+        response = test_client.get(
+            f"/dags/{DAG1_ID}/dagRuns/{DAG1_RUN1_ID}/wait",
+            params={"interval": "1"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data == {"state": DagRunState.SUCCESS}
