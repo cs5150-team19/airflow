@@ -588,11 +588,9 @@ class TaskInstance(Base, LoggingMixin, BaseWorkload):
     dag_version = relationship("DagVersion", back_populates="task_instances")
 
     # Simulation fields (Sprint 2)
-    is_simulation: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="0"
-    )
+    is_simulation: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
     estimated_runtime: Mapped[float | None] = mapped_column(Float, nullable=True)
-    predicted_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    predicted_outcome: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         Index("ti_dag_state", dag_id, state),
