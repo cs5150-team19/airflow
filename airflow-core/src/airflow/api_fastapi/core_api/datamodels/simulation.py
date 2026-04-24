@@ -28,7 +28,9 @@ class TaskSimulationResponse(BaseModel):
     confidence: float
 
 
-class CriticalPathResult:
+class CriticalPathResult(BaseModel):
+    """Critical-path info for a DAG simulation."""
+
     critical_path: list[str]
     critical_edges: list[tuple[str, str]]
     longest_task: str
