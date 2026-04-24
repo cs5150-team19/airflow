@@ -61,7 +61,8 @@ def get_historical_runtimes(
     offset: int = 0,
     session: Session = NEW_SESSION,
 ) -> list[HistoricalRuntime]:
-    """Retrieve historical runtimes for a specific task in a DAG.
+    """
+    Retrieve historical runtimes for a specific task in a DAG.
 
     Args:
         dag_id: The DAG identifier.
@@ -87,19 +88,16 @@ def get_historical_runtimes(
     limit = min(max(limit, 1), DEFAULT_LIMIT)
     offset = max(offset, 0)
 
-    stmt = (
-        select(
-            TaskInstance.run_id,
-            TaskInstance.duration,
-            TaskInstance.start_date,
-            TaskInstance.end_date,
-            TaskInstance.state,
-        )
-        .where(
-            TaskInstance.dag_id == dag_id,
-            TaskInstance.task_id == task_id,
-            TaskInstance.state.in_(states),
-        )
+    stmt = select(
+        TaskInstance.run_id,
+        TaskInstance.duration,
+        TaskInstance.start_date,
+        TaskInstance.end_date,
+        TaskInstance.state,
+    ).where(
+        TaskInstance.dag_id == dag_id,
+        TaskInstance.task_id == task_id,
+        TaskInstance.state.in_(states),
     )
 
     if start_date is not None:
@@ -114,11 +112,7 @@ def get_historical_runtimes(
     if exclude_simulations and hasattr(TaskInstance, "is_simulation"):
         stmt = stmt.where(TaskInstance.is_simulation.is_(False))
 
-    stmt = (
-        stmt.order_by(TaskInstance.start_date.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    stmt = stmt.order_by(TaskInstance.start_date.desc()).limit(limit).offset(offset)
 
     rows = session.execute(stmt).all()
 
