@@ -19,11 +19,12 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections import defaultdict, deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import pendulum
 
@@ -32,16 +33,35 @@ from airflow.cli.cli_config import DefaultHelpParser
 from airflow.configuration import conf
 from airflow.executors import workloads
 from airflow.executors.executor_loader import ExecutorLoader
-from airflow.executors.workloads.task import TaskInstanceDTO
+from airflow.executors.workloads.callback import ExecuteCallback
+from airflow.executors.workloads.task import ExecuteTask
+from airflow.executors.workloads.types import state_class_for_key
 from airflow.models import Log
 from airflow.models.callback import CallbackKey
 from airflow.observability.metrics import stats_utils
-from airflow.observability.trace import Trace
 from airflow.utils.log.logging_mixin import LoggingMixin
-from airflow.utils.state import TaskInstanceState
-from airflow.utils.thread_safe_dict import ThreadSafeDict
 
 PARALLELISM: int = conf.getint("core", "PARALLELISM")
+
+
+def get_execution_api_server_url(conf_source: AirflowConfigParser | ExecutorConf = conf) -> str:
+    """
+    Resolve the execution API server URL from configuration.
+
+    :param conf_source: Configuration source to read from. Defaults to the global ``conf``.
+        Team-specific executors can pass their own config (e.g. ``ExecutorConf``) to resolve
+        a team-specific URL.
+    """
+    base_url = conf_source.get("api", "base_url", fallback="/")
+    # ExecutorConf.get() is typed as str | None even when fallback= guarantees a str,
+    # so the `not base_url` guard and the cast() below keep mypy happy.
+    if not base_url or base_url.startswith("/"):
+        base_url = f"http://localhost:8080{base_url}"
+    default_execution_api_server = f"{base_url.rstrip('/')}/execution/"
+    return cast(
+        "str", conf_source.get("core", "execution_api_server_url", fallback=default_execution_api_server)
+    )
+
 
 if TYPE_CHECKING:
     import argparse
@@ -53,8 +73,10 @@ if TYPE_CHECKING:
     from airflow.callbacks.base_callback_sink import BaseCallbackSink
     from airflow.callbacks.callback_requests import CallbackRequest
     from airflow.cli.cli_config import GroupCommand
+    from airflow.configuration import AirflowConfigParser
     from airflow.executors.executor_utils import ExecutorName
-    from airflow.executors.workloads.types import WorkloadKey
+    from airflow.executors.workloads import ExecutorWorkload
+    from airflow.executors.workloads.types import WorkloadKey, WorkloadState
     from airflow.models.taskinstance import TaskInstance
     from airflow.models.taskinstancekey import TaskInstanceKey
 
@@ -143,8 +165,6 @@ class BaseExecutor(LoggingMixin):
     :param parallelism: how many jobs should run at one time.
     """
 
-    active_spans = ThreadSafeDict()
-
     supports_ad_hoc_ti_run: bool = False
     supports_callbacks: bool = False
     supports_multi_team: bool = False
@@ -152,6 +172,11 @@ class BaseExecutor(LoggingMixin):
 
     is_local: bool = False
     is_production: bool = True
+
+    # When True, the scheduler pre-assigns external_executor_id (a UUID) at queuing time,
+    # committed atomically with the QUEUED state. The executor can then use this ID to
+    # correlate the task with its external representation (e.g. Celery task_id).
+    pre_assigns_external_executor_id: ClassVar[bool] = False
 
     serve_logs: bool = False
 
@@ -217,18 +242,17 @@ class BaseExecutor(LoggingMixin):
         _repr += ")"
         return _repr
 
-    @classmethod
-    def set_active_spans(cls, active_spans: ThreadSafeDict):
-        cls.active_spans = active_spans
-
     def start(self):  # pragma: no cover
         """Executors may need to get things started."""
 
-    def log_task_event(self, *, event: str, extra: str, ti_key: TaskInstanceKey):
+    def log_task_event(self, *, event: str, extra: str, ti_key: WorkloadKey):
         """Add an event to the log table."""
+        if isinstance(ti_key, CallbackKey):
+            self.log.debug("Skipping log_task_event for callback key %s (event=%s)", ti_key, event)
+            return
         self._task_event_logs.append(Log(event=event, task_instance=ti_key, extra=extra))
 
-    def queue_workload(self, workload: workloads.All, session: Session) -> None:
+    def queue_workload(self, workload: ExecutorWorkload, session: Session) -> None:
         if isinstance(workload, workloads.ExecuteTask):
             ti = workload.ti
             self.queued_tasks[ti.key] = workload
@@ -246,7 +270,7 @@ class BaseExecutor(LoggingMixin):
                 f"Workload must be one of: ExecuteTask, ExecuteCallback."
             )
 
-    def _get_workloads_to_schedule(self, open_slots: int) -> list[tuple[WorkloadKey, workloads.All]]:
+    def _get_workloads_to_schedule(self, open_slots: int) -> list[tuple[WorkloadKey, ExecutorWorkload]]:
         """
         Select and return the next batch of workloads to schedule, respecting priority policy.
 
@@ -255,7 +279,7 @@ class BaseExecutor(LoggingMixin):
 
         :param open_slots: Number of available execution slots
         """
-        workloads_to_schedule: list[tuple[WorkloadKey, workloads.All]] = []
+        workloads_to_schedule: list[tuple[WorkloadKey, ExecutorWorkload]] = []
 
         if self.queued_callbacks:
             for key, workload in self.queued_callbacks.items():
@@ -271,7 +295,7 @@ class BaseExecutor(LoggingMixin):
 
         return workloads_to_schedule
 
-    def _process_workloads(self, workloads: Sequence[workloads.All]) -> None:
+    def _process_workloads(self, workloads: Sequence[ExecutorWorkload]) -> None:
         """
         Process the given workloads.
 
@@ -340,17 +364,6 @@ class BaseExecutor(LoggingMixin):
         queued_tasks_metric_name = self._get_metric_name("executor.queued_tasks")
         running_tasks_metric_name = self._get_metric_name("executor.running_tasks")
 
-        span = Trace.get_current_span()
-        if span.is_recording():
-            span.add_event(
-                name="executor",
-                attributes={
-                    open_slots_metric_name: open_slots,
-                    queued_tasks_metric_name: num_queued_tasks,
-                    running_tasks_metric_name: num_running_tasks,
-                },
-            )
-
         self.log.debug("%s running task instances for executor %s", num_running_tasks, name)
         self.log.debug("%s in queue for executor %s", num_queued_tasks, name)
         if open_slots == 0:
@@ -415,30 +428,6 @@ class BaseExecutor(LoggingMixin):
             if key in self.attempts:
                 del self.attempts[key]
 
-            if isinstance(workload, workloads.ExecuteTask) and hasattr(workload, "ti"):
-                ti = workload.ti
-
-                # If it's None, then the span for the current id hasn't been started.
-                if self.active_spans is not None and self.active_spans.get("ti:" + str(ti.id)) is None:
-                    if isinstance(ti, TaskInstanceDTO):
-                        parent_context = Trace.extract(ti.parent_context_carrier)
-                    else:
-                        parent_context = Trace.extract(ti.dag_run.context_carrier)
-                    # Start a new span using the context from the parent.
-                    # Attributes will be set once the task has finished so that all
-                    # values will be available (end_time, duration, etc.).
-
-                    span = Trace.start_child_span(
-                        span_name=f"{ti.task_id}",
-                        parent_context=parent_context,
-                        component="task",
-                        start_as_current=False,
-                    )
-                    self.active_spans.set("ti:" + str(ti.id), span)
-                    # Inject the current context into the carrier.
-                    carrier = Trace.inject()
-                    ti.context_carrier = carrier
-
             workload_list.append(workload)
 
         if workload_list:
@@ -447,9 +436,7 @@ class BaseExecutor(LoggingMixin):
     # TODO: This should not be using `TaskInstanceState` here, this is just "did the process complete, or did
     # it die". It is possible for the task itself to finish with success, but the state of the task to be set
     # to FAILED. By using TaskInstanceState enum here it confuses matters!
-    def change_state(
-        self, key: TaskInstanceKey, state: TaskInstanceState, info=None, remove_running=True
-    ) -> None:
+    def change_state(self, key: WorkloadKey, state: WorkloadState, info=None, remove_running=True) -> None:
         """
         Change state of the task.
 
@@ -466,41 +453,41 @@ class BaseExecutor(LoggingMixin):
                 self.log.debug("Could not find key: %s", key)
         self.event_buffer[key] = state, info
 
-    def fail(self, key: TaskInstanceKey, info=None) -> None:
+    def fail(self, key: WorkloadKey, info=None) -> None:
         """
         Set fail state for the event.
 
         :param info: Executor information for the task instance
         :param key: Unique key for the task instance
         """
-        self.change_state(key, TaskInstanceState.FAILED, info)
+        self.change_state(key, state_class_for_key(key).FAILED, info)
 
-    def success(self, key: TaskInstanceKey, info=None) -> None:
+    def success(self, key: WorkloadKey, info=None) -> None:
         """
         Set success state for the event.
 
         :param info: Executor information for the task instance
         :param key: Unique key for the task instance
         """
-        self.change_state(key, TaskInstanceState.SUCCESS, info)
+        self.change_state(key, state_class_for_key(key).SUCCESS, info)
 
-    def queued(self, key: TaskInstanceKey, info=None) -> None:
+    def queued(self, key: WorkloadKey, info=None) -> None:
         """
         Set queued state for the event.
 
         :param info: Executor information for the task instance
         :param key: Unique key for the task instance
         """
-        self.change_state(key, TaskInstanceState.QUEUED, info)
+        self.change_state(key, state_class_for_key(key).QUEUED, info)
 
-    def running_state(self, key: TaskInstanceKey, info=None) -> None:
+    def running_state(self, key: WorkloadKey, info=None) -> None:
         """
         Set running state for the event.
 
         :param info: Executor information for the task instance
         :param key: Unique key for the task instance
         """
-        self.change_state(key, TaskInstanceState.RUNNING, info, remove_running=False)
+        self.change_state(key, state_class_for_key(key).RUNNING, info, remove_running=False)
 
     def get_event_buffer(self, dag_ids=None) -> dict[WorkloadKey, EventBufferValueType]:
         """
@@ -622,6 +609,72 @@ class BaseExecutor(LoggingMixin):
         Make sure to choose unique names for those commands, to avoid collisions.
         """
         return []
+
+    @staticmethod
+    def run_workload(
+        workload: ExecutorWorkload,
+        *,
+        server: str | None = None,
+        dry_run: bool = False,
+        subprocess_logs_to_stdout: bool = False,
+        proctitle: str | None = None,
+    ) -> int:
+        """
+        Pass the workload to the appropriate supervisor based on workload type.
+
+        Workload-specific attributes (log_path, sentry_integration, bundle_info, etc.) are read from the
+        workload object itself.
+
+        :param workload: The ``ExecutorWorkload`` to execute.
+        :param server: Base URL of the API server (used by task workloads).
+        :param dry_run: If True, execute without actual task execution (simulate run).
+        :param subprocess_logs_to_stdout: Should task logs also be sent to stdout via the main logger.
+        :param proctitle: Process title to set for this workload. If not provided, defaults to
+            ``"airflow supervisor: <workload.display_name>"``.
+        :return: Exit code of the process.
+        """
+        try:
+            if sys.platform != "darwin":
+                from setproctitle import setproctitle
+
+                setproctitle(proctitle or f"airflow supervisor: {workload.display_name}")
+        except ImportError:
+            pass
+
+        # Resolve server URL from config when not explicitly provided.
+        # For example, team-specific executors may wish to pass their own server URL.
+        if server is None:
+            server = get_execution_api_server_url()
+
+        if isinstance(workload, ExecuteTask):
+            from airflow.sdk.execution_time.supervisor import supervise_task
+
+            # workload.ti is a TaskInstanceDTO which duck-types as TaskInstance.
+            # TODO: Create a protocol for this.
+            return supervise_task(
+                ti=workload.ti,  # type: ignore[arg-type]
+                bundle_info=workload.bundle_info,
+                dag_rel_path=workload.dag_rel_path,
+                token=workload.token,
+                server=server,
+                dry_run=dry_run,
+                log_path=workload.log_path,
+                subprocess_logs_to_stdout=subprocess_logs_to_stdout,
+                sentry_integration=getattr(workload, "sentry_integration", ""),
+            )
+        if isinstance(workload, ExecuteCallback):
+            from airflow.sdk.execution_time.callback_supervisor import supervise_callback
+
+            return supervise_callback(
+                id=workload.callback.id,
+                callback_path=workload.callback.data.get("path", ""),
+                callback_kwargs=workload.callback.data.get("kwargs", {}),
+                log_path=workload.log_path,
+                bundle_info=workload.bundle_info,
+                token=workload.token,
+                server=server,
+            )
+        raise ValueError(f"Unknown workload type: {type(workload).__name__}")
 
     @classmethod
     def _get_parser(cls) -> argparse.ArgumentParser:

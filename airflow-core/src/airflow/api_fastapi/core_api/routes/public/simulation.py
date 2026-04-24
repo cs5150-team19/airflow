@@ -33,6 +33,8 @@ from airflow.api_fastapi.core_api.security import requires_access_dag
 from airflow.models.dagrun import DagRun
 from airflow.models.taskinstance import TaskInstance as TI
 from airflow.simulation.predictor_interface import DeterministicPredictor
+from airflow.simulation.critical_path import get_critical_path
+from airflow.simulation.predictor_interface import HistoricalPredictor
 
 simulation_router = AirflowRouter(tags=["Simulation"], prefix="/dags/{dag_id}")
 
@@ -76,12 +78,22 @@ def run_simulation(
             f"No task instances found for dag_id: `{dag_id}`, run_id: `{dag_run.run_id}`",
         )
 
-    predictor = DeterministicPredictor()
+    # predictor = DeterministicPredictor()
+    historical_predictor = HistoricalPredictor()
     tasks = [
         {"task_id": ti.task_id, "operator_type": ti.operator or "Unknown"}
         for ti in task_instances
     ]
-    estimate = predictor.estimate_dag(dag_id=dag_id, tasks=tasks)
+    # estimate = historical_predictor.estimate_dag(dag_id=dag_id, tasks=tasks)
+    estimates = []
+    total_runtime = 0
+    for t in tasks:
+        task_runtime_estimate = historical_predictor.estimate_task(
+            t["task_id"],
+            t["operator_type"],
+        )
+        estimates.append(task_runtime_estimate)
+        total_runtime += task_runtime_estimate.estimated_seconds
 
     simulation_id = str(uuid.uuid4())
     task_responses = [
@@ -91,15 +103,19 @@ def run_simulation(
             estimated_seconds=te.estimated_seconds,
             confidence=te.confidence,
         )
-        for te in estimate.task_estimates
+        for te in estimates
     ]
+
+    critical_path_response = get_critical_path(dag_run.get_dag(), task_responses)
+        
 
     response = SimulationResponse(
         simulation_id=simulation_id,
         dag_id=dag_id,
         task_estimates=task_responses,
-        total_estimated_seconds=estimate.total_task_seconds,
-        predicted_outcome=estimate.predicted_outcome.value,
+        total_estimated_seconds=total_runtime,
+        critical_path=critical_path_response, #bottle neck is returned in this function
+        predicted_outcome="success", #TODO: replace with actual model prediction in the future implementation
     )
 
     _simulation_results[simulation_id] = response

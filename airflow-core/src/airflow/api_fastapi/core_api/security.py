@@ -238,6 +238,13 @@ class PermittedDagVersionFilter(PermittedDagFilter):
         return select.where(DagVersion.dag_id.in_(self.value or set()))
 
 
+class PermittedBackfillFilter(PermittedDagFilter):
+    """A parameter that filters the permitted backfills for the user."""
+
+    def to_orm(self, select: Select) -> Select:
+        return select.where(Backfill.dag_id.in_(self.value or set()))
+
+
 def permitted_dag_filter_factory(
     method: ResourceMethod, filter_class=PermittedDagFilter
 ) -> Callable[[BaseUser, BaseAuthManager], PermittedDagFilter]:
@@ -281,6 +288,9 @@ ReadableTagsFilterDep = Annotated[
 ]
 ReadableDagVersionsFilterDep = Annotated[
     PermittedDagVersionFilter, Depends(permitted_dag_filter_factory("GET", PermittedDagVersionFilter))
+]
+ReadableBackfillsFilterDep = Annotated[
+    PermittedBackfillFilter, Depends(permitted_dag_filter_factory("GET", PermittedBackfillFilter))
 ]
 
 
@@ -769,6 +779,12 @@ def is_safe_url(target_url: str, request: Request | None = None) -> bool:
         # Can't enforce any security check.
         return True
 
+    # According to WHATWG for http/https /// is interpreted as // whereas urllib doesnt
+    # this leads to an inconsistency where python returns a target url with /// as a valid url
+    # The same thing also happens with \ where under WHATWG \ are translated to /
+    target_url = unquote(target_url).strip()
+    if target_url.startswith(("//", "/\\", "\\/", "\\\\")):
+        return False
     for base_url, parsed_base in parsed_bases:
         parsed_target = urlparse(urljoin(base_url, unquote(target_url)))  # Resolves relative URLs
 

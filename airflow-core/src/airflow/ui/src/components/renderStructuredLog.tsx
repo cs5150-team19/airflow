@@ -18,6 +18,7 @@
  */
 import { chakra, Code, Link } from "@chakra-ui/react";
 import type { TFunction } from "i18next";
+import type { JSX } from "react";
 import * as React from "react";
 import { Link as RouterLink } from "react-router-dom";
 
@@ -273,7 +274,7 @@ const renderStructuredLogImpl = ({
   }
 
   return (
-    <chakra.div display="flex" key={index} lineHeight={1.5}>
+    <chakra.div alignItems="flex-start" display="flex" key={index} lineHeight={1.5}>
       <RouterLink
         id={index.toString()}
         key={`line_${index}`}

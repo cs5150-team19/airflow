@@ -25,6 +25,7 @@ import ast
 import datetime
 import inspect
 import os
+import sys
 from argparse import Namespace
 from collections.abc import Callable, Iterable
 from enum import Enum
@@ -34,6 +35,7 @@ from typing import Any, NamedTuple
 
 import httpx
 import rich
+import yaml
 
 import airflowctl.api.datamodels.generated as generated_datamodels
 from airflowctl.api.client import NEW_API_CLIENT, Client, ClientKind, provide_api_client
@@ -64,8 +66,6 @@ def lazy_load_command(import_path: str) -> Callable:
 
 
 def safe_call_command(function: Callable, args: Iterable[Arg]) -> None:
-    import sys
-
     if os.getenv("AIRFLOW_CLI_DEBUG_MODE") == "true":
         rich.print(
             "[yellow]Debug mode is enabled. Please be aware that your credentials are not secure.\n"
@@ -90,10 +90,12 @@ def safe_call_command(function: Callable, args: Iterable[Arg]) -> None:
                 f"[red]Server response error: {e}. "
                 "Please check if the server is running and the API URL is correct.[/red]"
             )
+        sys.exit(1)
     except httpx.ReadTimeout as e:
         rich.print(f"[red]Read timeout error: {e}[/red]")
         if "timed out" in str(e):
             rich.print("[red]Please check if the server is running and the API ready to accept calls.[/red]")
+        sys.exit(1)
     except ServerResponseError as e:
         rich.print(f"Server response error: {e}")
         if "Client error message:" in str(e):
@@ -102,6 +104,7 @@ def safe_call_command(function: Callable, args: Iterable[Arg]) -> None:
                 "Please check the command and its parameters. "
                 "If you need help, run the command with --help."
             )
+        sys.exit(1)
 
 
 class DefaultHelpParser(argparse.ArgumentParser):
@@ -152,7 +155,10 @@ class Arg:
                     return self._is_valid_directory(parser, x)
 
                 self.kwargs["type"] = type
-        parser.add_argument(*self.flags, **self.kwargs)
+        kwargs = self.kwargs.copy()
+        if kwargs.get("action") is argparse.BooleanOptionalAction:
+            kwargs.pop("type", None)
+        parser.add_argument(*self.flags, **kwargs)
 
     def _is_valid_directory(self, parser, arg):
         if not os.path.isdir(arg):
@@ -187,6 +193,14 @@ def string_lower_type(val):
     if not val:
         return
     return val.strip().lower()
+
+
+def _load_help_texts_yaml() -> dict[str, dict[str, str]]:
+    """Load the help texts yaml for the auto-generated commands."""
+    help_texts_path = Path(__file__).parent / "help_texts.yaml"
+    with open(help_texts_path) as yaml_file:
+        help_texts = yaml.safe_load(yaml_file)
+    return help_texts
 
 
 # Common Positional Arguments
@@ -254,12 +268,11 @@ ARG_DAG_ID = Arg(
     help="The DAG ID of the DAG to pause or unpause",
 )
 
-# Variable Commands Args
-ARG_VARIABLE_ACTION_ON_EXISTING_KEY = Arg(
+ARG_ACTION_ON_EXISTING_KEY = Arg(
     flags=("-a", "--action-on-existing-key"),
     type=str,
     default="overwrite",
-    help="Action to take if we encounter a variable key that already exists.",
+    help="Action to take if the entity already exists.",
     choices=("overwrite", "fail", "skip"),
 )
 
@@ -366,6 +379,7 @@ class CommandFactory:
     output_command_list: list[str]
     exclude_operation_names: list[str]
     exclude_method_names: list[str]
+    help_texts: dict[str, dict[str, str]]
 
     def __init__(self, file_path: str | Path | None = None):
         self.datamodels_extended_map = {}
@@ -374,6 +388,7 @@ class CommandFactory:
         self.args_map = {}
         self.commands_map = {}
         self.group_commands_list = []
+        self.help_texts = _load_help_texts_yaml()
         self.file_path = inspect.getfile(BaseOperations) if file_path is None else file_path
         # Excluded Lists are in Class Level for further usage and avoid searching them
         # Exclude parameters that are not needed for CLI from datamodels
@@ -565,14 +580,15 @@ class CommandFactory:
             for parameter in operation.get("parameters"):
                 for parameter_key, parameter_type in parameter.items():
                     if self._is_primitive_type(type_name=parameter_type):
-                        is_bool = parameter_type == "bool"
+                        base_parameter_type = parameter_type.replace(" | None", "").strip()
+                        is_bool = base_parameter_type == "bool"
                         args.append(
                             self._create_arg(
                                 arg_flags=("--" + self._sanitize_arg_parameter_key(parameter_key),),
                                 arg_type=self._python_type_from_string(parameter_type),
                                 arg_action=argparse.BooleanOptionalAction if is_bool else None,
                                 arg_help=f"{parameter_key} for {operation.get('name')} operation in {operation.get('parent').name}",
-                                arg_default=False if is_bool else None,
+                                arg_default=None,
                             )
                         )
                     else:
@@ -716,12 +732,15 @@ class CommandFactory:
         for operation in self.operations:
             operation_name = operation["name"]
             operation_group_name = operation["parent"].name
+            help_text = self.help_texts.get(operation_group_name.replace("Operations", "").lower(), {}).get(
+                operation_name.replace("_", "-")
+            )
             if operation_group_name not in self.commands_map:
                 self.commands_map[operation_group_name] = []
             self.commands_map[operation_group_name].append(
                 ActionCommand(
                     name=operation["name"].replace("_", "-"),
-                    help=f"Perform {operation_name} operation",
+                    help=help_text,
                     func=self.func_map[(operation_name, operation_group_name)],
                     args=self.args_map[(operation_name, operation_group_name)],
                 )
@@ -842,6 +861,20 @@ AUTH_COMMANDS = (
         func=lazy_load_command("airflowctl.ctl.commands.auth_command.list_envs"),
         args=(ARG_OUTPUT,),
     ),
+    ActionCommand(
+        name="token",
+        help="Generate and print a JWT token for the given credentials",
+        description=(
+            "Authenticate with username and password and print the access token to stdout. "
+            "Username and password are prompted interactively if not provided."
+        ),
+        func=lazy_load_command("airflowctl.ctl.commands.auth_command.get_token"),
+        args=(
+            ARG_AUTH_URL,
+            ARG_AUTH_USERNAME,
+            ARG_AUTH_PASSWORD,
+        ),
+    ),
 )
 
 CONFIG_COMMANDS = (
@@ -865,7 +898,10 @@ CONNECTION_COMMANDS = (
         name="import",
         help="Import connections from a file exported with local CLI.",
         func=lazy_load_command("airflowctl.ctl.commands.connection_command.import_"),
-        args=(Arg(flags=("file",), metavar="FILEPATH", help="Connections JSON file"),),
+        args=(
+            Arg(flags=("file",), metavar="FILEPATH", help="Connections JSON file"),
+            ARG_ACTION_ON_EXISTING_KEY,
+        ),
     ),
 )
 
@@ -895,7 +931,7 @@ POOL_COMMANDS = (
         name="import",
         help="Import pools",
         func=lazy_load_command("airflowctl.ctl.commands.pool_command.import_"),
-        args=(ARG_FILE,),
+        args=(ARG_FILE, ARG_ACTION_ON_EXISTING_KEY),
     ),
     ActionCommand(
         name="export",
@@ -913,7 +949,7 @@ VARIABLE_COMMANDS = (
         name="import",
         help="Import variables from a file exported with local CLI.",
         func=lazy_load_command("airflowctl.ctl.commands.variable_command.import_"),
-        args=(ARG_FILE, ARG_VARIABLE_ACTION_ON_EXISTING_KEY),
+        args=(ARG_FILE, ARG_ACTION_ON_EXISTING_KEY),
     ),
 )
 

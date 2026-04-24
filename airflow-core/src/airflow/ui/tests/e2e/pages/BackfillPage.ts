@@ -94,7 +94,7 @@ export class BackfillPage extends BasePage {
     super(page);
     this.triggerButton = page.getByTestId("trigger-dag-button");
     // Chakra UI radio cards: target the label directly since <input> is hidden.
-    this.backfillModeRadio = page.locator('label:has-text("Backfill")');
+    this.backfillModeRadio = page.locator("label").getByText("Backfill", { exact: true });
     this.backfillFromDateInput = page.getByTestId("datetime-input").first();
     this.backfillToDateInput = page.getByTestId("datetime-input").nth(1);
     this.backfillRunButton = page.getByRole("button", { name: "Run Backfill" });
@@ -374,18 +374,18 @@ export class BackfillPage extends BasePage {
     return this.page.getByRole("button", { name: /filter table columns/i });
   }
 
-  public async getTableColumnCount(): Promise<number> {
-    return this.backfillsTable.locator("thead th").count();
-  }
-
   public async navigateToBackfillsTab(dagName: string): Promise<void> {
-    await this.navigateTo(BackfillPage.getBackfillsUrl(dagName));
-    await expect(this.backfillsTable).toBeVisible({ timeout: 15_000 });
+    await expect(async () => {
+      await this.navigateTo(BackfillPage.getBackfillsUrl(dagName));
+      await expect(this.backfillsTable).toBeVisible({ timeout: 5000 });
+    }).toPass({ intervals: [2000], timeout: 60_000 });
   }
 
   public async navigateToDagDetail(dagName: string): Promise<void> {
-    await this.navigateTo(BackfillPage.getDagDetailUrl(dagName));
-    await expect(this.triggerButton).toBeVisible({ timeout: 15_000 });
+    await expect(async () => {
+      await this.navigateTo(BackfillPage.getDagDetailUrl(dagName));
+      await expect(this.triggerButton).toBeVisible({ timeout: 5000 });
+    }).toPass({ intervals: [2000], timeout: 60_000 });
   }
 
   public async openBackfillDialog(): Promise<void> {
@@ -395,36 +395,64 @@ export class BackfillPage extends BasePage {
   }
 
   public async openFilterMenu(): Promise<void> {
-    await this.getFilterButton().click();
-    await expect(this.page.getByRole("menu")).toBeVisible({ timeout: 5000 });
+    await expect(async () => {
+      if (!(await this.page.getByRole("menu").isVisible())) {
+        await this.getFilterButton().click();
+      }
+      await expect(this.page.getByRole("menu")).toBeVisible({ timeout: 3000 });
+      await this.page.getByRole("menuitem").first().click({ timeout: 3000, trial: true });
+    }).toPass({ intervals: [1000], timeout: 15_000 });
   }
 
   public async pauseBackfillViaApi(backfillId: number): Promise<boolean> {
-    // Retry: the server may not have fully initialized the backfill yet.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const response = await this.page.request.put(`${baseUrl}/api/v2/backfills/${backfillId}/pause`, {
-        timeout: 30_000,
-      });
+    let isPaused = false;
 
-      if (response.ok()) {
-        return true;
-      }
+    try {
+      // Retry: the server may not have fully initialized the backfill yet.
+      await expect
+        .poll(
+          async () => {
+            const response = await this.page.request.put(`${baseUrl}/api/v2/backfills/${backfillId}/pause`, {
+              timeout: 30_000,
+            });
 
-      // 409 means the backfill already completed — not retriable.
-      if (response.status() === 409) {
-        return false;
-      }
+            if (response.ok()) {
+              isPaused = true;
 
-      await this.page.waitForTimeout(2000);
+              return true;
+            }
+
+            // 409 means the backfill already completed — not retriable.
+            if (response.status() === 409) {
+              isPaused = false;
+
+              return true;
+            }
+
+            return false;
+          },
+          {
+            intervals: [2000],
+            message: `Failed to pause backfill ${backfillId}`,
+            timeout: 10_000,
+          },
+        )
+        .toBeTruthy();
+    } catch {
+      return false;
     }
 
-    return false;
+    return isPaused;
   }
 
   public async selectReprocessBehavior(behavior: ReprocessBehaviorApi): Promise<void> {
     const label = REPROCESS_API_TO_UI[behavior];
 
-    await this.page.locator(`label:has-text("${label}")`).first().click({ timeout: 5000 });
+    await this.page
+      .getByRole("radiogroup", { name: "Reprocess Behavior" })
+      .locator("label")
+      .filter({ hasText: label })
+      .click({ timeout: 10_000 });
   }
 
   public async toggleColumn(columnName: string): Promise<void> {

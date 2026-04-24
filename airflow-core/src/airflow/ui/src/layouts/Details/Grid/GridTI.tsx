@@ -102,6 +102,7 @@ export const GridTI = ({
       <TaskInstanceTooltip openDelay={500} positioning={{ placement: "bottom" }} taskInstance={instance}>
         <Box alignItems="center" as="span" display="inline-flex" gap={1}>
           <Link
+            data-testid={`grid-${runId}-${taskId}`}
             id={`grid-${runId}-${taskId}`}
             onClick={onClick}
             replace

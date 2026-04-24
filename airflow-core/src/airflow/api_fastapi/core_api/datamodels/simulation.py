@@ -28,6 +28,12 @@ class TaskSimulationResponse(BaseModel):
     confidence: float
 
 
+class CriticalPathResult:
+    critical_path: list[str]
+    critical_edges: list[tuple[str, str]]
+    longest_task: str
+
+
 class SimulationResponse(BaseModel):
     """Response for a DAG simulation."""
 
@@ -35,4 +41,5 @@ class SimulationResponse(BaseModel):
     dag_id: str
     task_estimates: list[TaskSimulationResponse]
     total_estimated_seconds: int
+    critical_path: CriticalPathResult
     predicted_outcome: str

@@ -40,7 +40,7 @@ import jinja2
 from dateutil.relativedelta import relativedelta
 
 from airflow import settings
-from airflow.sdk import TaskInstanceState, TriggerRule
+from airflow.sdk import TaskInstanceState, TriggerRule, XComArg
 from airflow.sdk.bases.operator import BaseOperator
 from airflow.sdk.bases.timetable import BaseTimetable
 from airflow.sdk.definitions._internal.node import validate_key
@@ -62,7 +62,7 @@ from airflow.sdk.exceptions import (
 
 if TYPE_CHECKING:
     from re import Pattern
-    from typing import TypeAlias
+    from typing import TypeAlias, TypeVar
 
     from pendulum.tz.timezone import FixedTimezone, Timezone
     from typing_extensions import Self, TypeIs
@@ -77,6 +77,8 @@ if TYPE_CHECKING:
     from airflow.timetables.base import DataInterval, Timetable as CoreTimetable
 
     Operator: TypeAlias = BaseOperator | MappedOperator
+
+    X = TypeVar("X", bound=XComArg)
 
 log = logging.getLogger(__name__)
 
@@ -362,7 +364,7 @@ class DAG:
         accessible in templates, namespaced under `params`. These
         params can be overridden at the task level.
     :param max_active_tasks: the number of task instances allowed to run
-        concurrently
+        concurrently per Dag run. Note that in Airflow 2 this was a global limit on the Dag, since Airflow 3 it is per run.
     :param max_active_runs: maximum number of active DAG runs, beyond this
         number of DAG runs in a running state, the scheduler won't create
         new active DAG runs
@@ -1098,6 +1100,16 @@ class DAG:
         if tg:
             tg._remove(task)
 
+    def add_result(self, xcom_arg: X) -> X:
+        from airflow.sdk.bases.xcom import BaseXCom
+        from airflow.sdk.definitions.xcom_arg import PlainXComArg
+
+        if not isinstance(xcom_arg, PlainXComArg) or xcom_arg.key != BaseXCom.XCOM_RETURN_KEY:
+            raise ValueError("Only plain return value can be used as dag result")
+
+        xcom_arg.operator.returns_dag_result = True
+        return xcom_arg
+
     def check_cycle(self) -> None:
         """
         Check to see if there are any cycles in the Dag.
@@ -1324,10 +1336,6 @@ class DAG:
                 triggered_by=DagRunTriggeredByType.TEST,
                 triggering_user_name="dag_test",
             )
-            # Start a mock span so that one is present and not started downstream. We
-            # don't care about otel in dag.test and starting the span during dagrun update
-            # is not functioning properly in this context anyway.
-            dr.start_dr_spans_if_needed(tis=[])
 
             log.debug("starting dagrun")
             # Instead of starting a scheduler, we run the minimal loop possible to check

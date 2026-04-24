@@ -35,9 +35,8 @@ from pathlib import Path
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    import tomli as tomllib  # type: ignore[no-redef]
 
-sys.path.insert(0, str(Path(__file__).parent.resolve()))  # make sure common_prek_utils is imported
 from common_prek_utils import AIRFLOW_ROOT_PATH, console
 
 SHARED_DIR = AIRFLOW_ROOT_PATH / "shared"

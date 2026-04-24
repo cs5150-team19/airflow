@@ -38,7 +38,7 @@ Multi-Team mode is designed for medium to large organizations that typically hav
 **Use Multi-Team mode when:**
 
 - You have many teams that need to share Airflow infrastructure
-- You need resource isolation (Variables, Connections, Secrets, etc) between teams
+- You need resource isolation (Variables, Connections, Secrets, etc) between teams at the UI and API level (see :doc:`/security/security_model` for task-level isolation limitations)
 - You want separate execution environments per team
 - You want separate views per team in the Airflow UI
 - You want to minimize operational overhead or cost by sharing a single Airflow deployment
@@ -90,6 +90,27 @@ Secrets Backends are supported on a case by case basis.
 
 When a task requests a Variable or Connection, the secrets backend will return a team-specific value, if any. The
 backend will automatically resolve the correct value based on the requesting task's team.
+
+Auth Manager
+""""""""""""
+
+In order to use multi-team mode, the auth manager must be compatible with it. A compatible auth manager must
+implement two methods:
+
+- ``is_authorized_team``: Determines whether a user is authorized to perform a given action on a team. It is
+  used primarily to check whether a user belongs to a team.
+- ``_get_teams``: Returns the set of teams defined in the auth manager.
+
+During initialization, Airflow validates that all teams defined in the auth manager are also present in the
+Airflow metadata database. If any team is missing, Airflow will raise an error.
+
+If the auth manager you are using does not implement these methods, Airflow will raise a
+``NotImplementedError`` at runtime.
+
+Example of auth managers compatible with multi-team:
+
+- :doc:`Simple auth manager </core-concepts/auth-manager/index>` (recommended for development usage only)
+- :doc:`Keycloak auth manager <apache-airflow-providers-keycloak:auth-manager/index>`
 
 Enabling Multi-Team Mode
 ------------------------

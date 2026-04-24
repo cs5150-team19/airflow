@@ -174,6 +174,8 @@ export const Overview = () => {
       taskId: Boolean(groupId) ? undefined : taskId,
     });
 
+  const failedTaskCount = failedTaskInstancesData?.total_entries ?? 0;
+
   const { data: tiData, isLoading: isLoadingTaskInstances } = useTaskInstanceServiceGetTaskInstances(
     {
       dagId,
@@ -415,15 +417,15 @@ export const Overview = () => {
       </Box>
       <HStack flexWrap="wrap">
         <TrendCountButton
-          colorPalette={(failedTaskInstances?.total_entries ?? 0) === 0 ? "green" : "red"}
-          count={failedTaskInstances?.total_entries ?? 0}
+          colorPalette={failedTaskCount === 0 ? "green" : "red"}
+          count={failedTaskCount}
           endDate={endDate}
-          events={(failedTaskInstances?.task_instances ?? []).map((ti) => ({
+          events={(failedTaskInstancesData?.task_instances ?? []).map((ti) => ({
             timestamp: ti.start_date ?? ti.logical_date,
           }))}
           isLoading={isFailedTaskInstancesLoading}
           label={translate("overview.buttons.failedTaskInstance", {
-            count: failedTaskInstances?.total_entries ?? 0,
+            count: failedTaskCount,
           })}
           route={{
             pathname: "task_instances",
