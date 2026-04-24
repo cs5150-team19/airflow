@@ -241,7 +241,7 @@ export const DagRuns = () => {
       consumingAssetPattern: filteredConsumingAsset ?? undefined,
       cursor: cursor ?? "",
       dagId: dagId ?? "~",
-      dagIdPattern: filteredDagIdPattern ?? undefined,
+      dagIdPrefixPattern: filteredDagIdPattern ?? undefined,
       dagVersion:
         filteredDagVersion !== null && filteredDagVersion !== "" ? [Number(filteredDagVersion)] : undefined,
       durationGte: durationGte !== null && durationGte !== "" ? Number(durationGte) : undefined,
@@ -252,15 +252,20 @@ export const DagRuns = () => {
       logicalDateGte: logicalDateGte ?? undefined,
       logicalDateLte: logicalDateLte ?? undefined,
       orderBy,
-      partitionKeyPattern: partitionKeyPattern ?? undefined,
+      partitionKeyPrefixPattern: partitionKeyPattern ?? undefined,
       runAfterGte: runAfterGte ?? undefined,
       runAfterLte: runAfterLte ?? undefined,
+<<<<<<< ui
       runIdPattern: filteredRunIdPattern ?? undefined,
       runType: isSimulating ? ["simulation"] : (filteredType === null ? undefined : [filteredType]),
+=======
+      runIdPrefixPattern: filteredRunIdPattern ?? undefined,
+      runType: filteredType === null ? undefined : [filteredType],
+>>>>>>> feature
       startDateGte: startDateGte ?? undefined,
       startDateLte: startDateLte ?? undefined,
       state: filteredState === null ? undefined : [filteredState],
-      triggeringUserNamePattern: filteredTriggeringUserNamePattern ?? undefined,
+      triggeringUserNamePrefixPattern: filteredTriggeringUserNamePattern ?? undefined,
     },
     undefined,
     {

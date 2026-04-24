@@ -15,33 +15,3 @@
 # specific language governing permissions and limitations
 # under the License.
 from __future__ import annotations
-
-from airflow.api_fastapi.core_api.base import BaseModel
-
-
-class TaskSimulationResponse(BaseModel):
-    """Response for a single task simulation estimate."""
-
-    task_id: str
-    operator_type: str
-    estimated_seconds: int
-    confidence: float
-
-
-class CriticalPathResult(BaseModel):
-    """Critical-path info for a DAG simulation."""
-
-    critical_path: list[str]
-    critical_edges: list[tuple[str, str]]
-    longest_task: str
-
-
-class SimulationResponse(BaseModel):
-    """Response for a DAG simulation."""
-
-    simulation_id: str
-    dag_id: str
-    task_estimates: list[TaskSimulationResponse]
-    total_estimated_seconds: int
-    critical_path: CriticalPathResult
-    predicted_outcome: str

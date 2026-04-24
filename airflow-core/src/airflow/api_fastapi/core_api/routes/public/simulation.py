@@ -32,9 +32,9 @@ from airflow.api_fastapi.core_api.openapi.exceptions import create_openapi_http_
 from airflow.api_fastapi.core_api.security import requires_access_dag
 from airflow.models.dagrun import DagRun
 from airflow.models.taskinstance import TaskInstance as TI
-from airflow.simulation.predictor_interface import DeterministicPredictor
 from airflow.simulation.critical_path import get_critical_path
-from airflow.simulation.predictor_interface import HistoricalPredictor
+from airflow.simulation.predictor_interface import DeterministicPredictor
+from airflow.simulation.predictors.historical_predictor import HistoricalPredictor
 
 simulation_router = AirflowRouter(tags=["Simulation"], prefix="/dags/{dag_id}")
 
@@ -78,13 +78,13 @@ def run_simulation(
             f"No task instances found for dag_id: `{dag_id}`, run_id: `{dag_run.run_id}`",
         )
 
-    # predictor = DeterministicPredictor()
+    
     historical_predictor = HistoricalPredictor()
     tasks = [
         {"task_id": ti.task_id, "operator_type": ti.operator or "Unknown"}
         for ti in task_instances
     ]
-    # estimate = historical_predictor.estimate_dag(dag_id=dag_id, tasks=tasks)
+    
     estimates = []
     total_runtime = 0
     for t in tasks:
