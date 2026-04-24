@@ -78,13 +78,13 @@ def run_simulation(
             f"No task instances found for dag_id: `{dag_id}`, run_id: `{dag_run.run_id}`",
         )
 
-    # predictor = DeterministicPredictor()
+    
     historical_predictor = HistoricalPredictor()
     tasks = [
         {"task_id": ti.task_id, "operator_type": ti.operator or "Unknown"}
         for ti in task_instances
     ]
-    # estimate = historical_predictor.estimate_dag(dag_id=dag_id, tasks=tasks)
+    
     estimates = []
     total_runtime = 0
     for t in tasks:
