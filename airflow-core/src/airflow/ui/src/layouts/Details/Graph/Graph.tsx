@@ -189,7 +189,15 @@ export const Graph = () => {
     versionNumber: selectedVersion,
   });
 
-  const { data: gridTISummaries } = useGridTiSummaries({ dagId, runId });
+  const { data: dagRun } = useDagRunServiceGetDagRun({ dagId, dagRunId: runId }, undefined, {
+    enabled: Boolean(dagId) && Boolean(runId),
+  });
+  const { summariesByRunId } = useGridTiSummariesStream({
+    dagId,
+    runIds: runId ? [runId] : [],
+    states: dagRun === undefined ? undefined : [dagRun.state],
+  });
+  const gridTISummaries = runId ? summariesByRunId.get(runId) : undefined;
   const simulationMetadataByTaskId = getSimulationTaskDisplayMetadata(
     (data?.nodes ?? []).filter((node) => node.type === "task").map((node) => node.id),
     simulationDisplayOptions,
