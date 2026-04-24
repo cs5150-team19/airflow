@@ -27,7 +27,7 @@ import click
 
 from airflow_breeze.commands.common_options import option_dry_run, option_verbose
 from airflow_breeze.utils.click_utils import BreezeGroup
-from airflow_breeze.utils.console import get_console
+from airflow_breeze.utils.console import console_print, get_console
 from airflow_breeze.utils.docker_command_utils import perform_environment_checks
 from airflow_breeze.utils.path_utils import AIRFLOW_ROOT_PATH
 from airflow_breeze.utils.run_utils import assert_prek_installed, run_compile_ui_assets
@@ -89,6 +89,7 @@ PLURAL_SUFFIXES = {
     "nl": MOST_COMMON_PLURAL_SUFFIXES,
     "pl": ["_one", "_few", "_many", "_other"],
     "pt": ["_zero", "_one", "_many", "_other"],
+    "ru": ["_one", "_few", "_other"],
     "th": ["_other"],
     "tr": MOST_COMMON_PLURAL_SUFFIXES,
     "zh-CN": ["_other"],
@@ -149,10 +150,12 @@ def expand_plural_keys(keys: set[str], lang: str, en_key_to_value: dict[str, str
     """
     For a set of keys, expand plural bases to include required suffixes for the language.
 
-    When en_key_to_value is provided, only expand a base to all plural forms when at least
-    one of the English values for that base contains {{count}}. Keys without {{count}}
-    (e.g. fixed "1 Error") are not expanded, so locales are not required to have
-    unused forms like error_other when the source only has error_one.
+    When en_key_to_value is provided, expand a plural base if either:
+    - one of the English values for that base contains {{count}}, or
+    - English defines multiple plural forms for that base (for example *_one and *_other).
+
+    This prevents falsely marking locale-specific plural keys as unused when count drives
+    plural selection but is not interpolated in the English string itself.
     """
     console = get_console()
     suffixes = PLURAL_SUFFIXES.get(lang)
@@ -173,7 +176,9 @@ def expand_plural_keys(keys: set[str], lang: str, en_key_to_value: dict[str, str
         if en_key_to_value is not None:
             en_keys_for_base = [k for k in keys if get_plural_base(k, suffixes) == base]
             any_has_count = any(COUNT_PLACEHOLDER in en_key_to_value.get(k, "") for k in en_keys_for_base)
-            if not any_has_count:
+            has_multiple_en_plural_forms = len(en_keys_for_base) > 1
+
+            if not any_has_count and not has_multiple_en_plural_forms:
                 continue
         for suffix in suffixes:
             expanded.add(base + suffix)
@@ -242,7 +247,7 @@ def compare_keys(
                     data = load_json(path)
                     keys = set(flatten_keys(data))
                 except Exception as e:
-                    get_console().print(f"Error loading {path}: {e}")
+                    console_print(f"Error loading {path}: {e}")
             key_sets.append(LocaleKeySet(locale=lf.locale, keys=keys))
         keys_by_locale = {ks.locale: ks.keys for ks in key_sets}
         en_keys = keys_by_locale.get("en", set()) or set()
@@ -253,7 +258,7 @@ def compare_keys(
                 en_data = load_json(en_path)
                 en_key_to_value = flatten_keys_to_values(en_data)
             except Exception as e:
-                get_console().print(f"Error loading en values from {en_path}: {e}")
+                console_print(f"Error loading en values from {en_path}: {e}")
         # Required = EN keys plus, for bases with {{count}} in EN, all plural forms for the locale
         missing_keys: dict[str, list[str]] = {}
         unused_keys: dict[str, list[str]] = {}
@@ -752,5 +757,5 @@ def compile_ui_assets(dev: bool, force_clean: bool):
         dev=dev, run_in_background=False, force_clean=force_clean, additional_ui_hooks=[]
     )
     if compile_ui_assets_result.returncode != 0:
-        get_console().print("[warn]New assets were generated[/]")
+        console_print("[warn]New assets were generated[/]")
     sys.exit(0)

@@ -176,6 +176,18 @@ class TestGetBackfill(TestBackfillEndpoint):
             "updated_at": mock.ANY,
         }
 
+    def test_get_backfill_with_null_conf(self, session, test_client):
+        """dag_run_conf can be NULL in the DB; the API should still serialize it."""
+        (dag,) = self._create_dag_models()
+        from_date = timezone.utcnow()
+        to_date = timezone.utcnow()
+        backfill = Backfill(dag_id=dag.dag_id, from_date=from_date, to_date=to_date, dag_run_conf=None)
+        session.add(backfill)
+        session.commit()
+        response = test_client.get(f"/backfills/{backfill.id}")
+        assert response.status_code == 200
+        assert response.json()["dag_run_conf"] is None
+
     def test_no_exist(self, session, test_client):
         response = test_client.get(f"/backfills/{231984098}")
         assert response.status_code == 404
@@ -268,7 +280,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
         assert response.json().get("detail") == "Could not find dag DAG_NOT_EXIST"
 
     def test_no_schedule_dag(self, session, dag_maker, test_client):
-        with dag_maker(session=session, dag_id="TEST_DAG_1", schedule="None") as dag:
+        with dag_maker(session=session, dag_id="TEST_DAG_1", schedule=None) as dag:
             EmptyOperator(task_id="mytask")
         session.scalars(select(DagModel)).all()
         session.commit()
@@ -291,7 +303,7 @@ class TestCreateBackfill(TestBackfillEndpoint):
             json=data,
         )
         assert response.status_code == 422
-        assert response.json().get("detail") == f"{dag.dag_id} has no schedule"
+        assert "has a non-periodic schedule that does not support backfills" in response.json().get("detail")
 
     @pytest.mark.parametrize(
         ("repro_act", "repro_exp", "run_backwards", "status_code"),

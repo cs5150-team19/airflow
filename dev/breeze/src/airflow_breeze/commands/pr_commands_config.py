@@ -18,14 +18,23 @@ from __future__ import annotations
 
 PR_COMMANDS: dict[str, str | list[str]] = {
     "name": "PR commands",
-    "commands": ["auto-triage"],
+    "commands": ["auto-triage", "stats"],
 }
 
 PR_PARAMETERS: dict[str, list[dict[str, str | list[str]]]] = {
     "breeze pr auto-triage": [
         {
-            "name": "GitHub parameters",
-            "options": ["--github-token", "--github-repository"],
+            "name": "Mode",
+            "options": ["--mode", "--tui", "--llm-use"],
+        },
+        {
+            "name": "Select people",
+            "options": [
+                "--author",
+                "--authors",
+                "--reviews-for-me",
+                "--reviews-for",
+            ],
         },
         {
             "name": "Target selection",
@@ -36,16 +45,13 @@ PR_PARAMETERS: dict[str, list[dict[str, str | list[str]]]] = {
             "options": [
                 "--label",
                 "--exclude-label",
-                "--author",
                 "--created-after",
                 "--created-before",
                 "--updated-after",
                 "--updated-before",
-                "--include-collaborators",
                 "--pending-approval-only",
                 "--checks-state",
                 "--min-commits-behind",
-                "--review-requested",
             ],
         },
         {
@@ -55,14 +61,29 @@ PR_PARAMETERS: dict[str, list[dict[str, str | list[str]]]] = {
         {
             "name": "Assessment options",
             "options": [
-                "--check-mode",
                 "--llm-model",
                 "--llm-concurrency",
+                "--clear-cache",
             ],
         },
         {
-            "name": "Action options",
-            "options": ["--answer-triage"],
+            "name": "Other",
+            "options": [
+                "--answer-triage",
+                "--github-token",
+                "--github-repository",
+            ],
+        },
+    ],
+    "breeze pr stats": [
+        {
+            "name": "Options",
+            "options": [
+                "--batch-size",
+                "--clear-cache",
+                "--github-token",
+                "--github-repository",
+            ],
         },
     ],
 }
