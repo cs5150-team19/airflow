@@ -255,13 +255,8 @@ export const DagRuns = () => {
       partitionKeyPrefixPattern: partitionKeyPattern ?? undefined,
       runAfterGte: runAfterGte ?? undefined,
       runAfterLte: runAfterLte ?? undefined,
-<<<<<<< ui
-      runIdPattern: filteredRunIdPattern ?? undefined,
-      runType: isSimulating ? ["simulation"] : (filteredType === null ? undefined : [filteredType]),
-=======
       runIdPrefixPattern: filteredRunIdPattern ?? undefined,
-      runType: filteredType === null ? undefined : [filteredType],
->>>>>>> feature
+      runType: isSimulating ? ["simulation"] : filteredType === null ? undefined : [filteredType],
       startDateGte: startDateGte ?? undefined,
       startDateLte: startDateLte ?? undefined,
       state: filteredState === null ? undefined : [filteredState],

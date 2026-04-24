@@ -345,9 +345,9 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
                         showVersionIndicatorMode={showVersionIndicatorMode}
                         triggeringUser={triggeringUserFilter}
                       />
-                    </HStack>
-                  )}
-                </Box>
+                    ) : undefined}
+                  </HStack>
+                )}
                 {isSimulating ? <SimulationMenu /> : undefined}
               </Flex>
             </Panel>
