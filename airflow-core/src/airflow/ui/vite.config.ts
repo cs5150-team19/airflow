@@ -29,6 +29,14 @@ export default defineConfig({
     exclude: ["@guanmingchiu/sqlparser-ts"], // WASM package needs to be excluded from pre-bundling
   },
   plugins: [
+    {
+      name: "html-transform",
+      transformIndexHtml: (html, ctx) =>
+        html.replace(
+          `{{ backend_server_base_url }}`,
+          ctx.server ? `/` : `http://localhost:28080/`,
+        ),
+    },
     react(),
     babel({
       presets: [reactCompilerPreset()],
@@ -44,8 +52,21 @@ export default defineConfig({
   resolve: { alias: { openapi: "/openapi-gen", src: "/src" } },
   server: {
     cors: true, // Only used by the dev server.
+    host: true,
     proxy: {
+      "/api": {
+        changeOrigin: true,
+        target: "http://localhost:28080",
+      },
       "/hitl-review": {
+        changeOrigin: true,
+        target: "http://localhost:28080",
+      },
+      "/static": {
+        changeOrigin: true,
+        target: "http://localhost:28080",
+      },
+      "/ui": {
         changeOrigin: true,
         target: "http://localhost:28080",
       },

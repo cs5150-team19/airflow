@@ -24,6 +24,7 @@ import { LuChartColumn } from "react-icons/lu";
 import { MdDetails, MdOutlineEventNote } from "react-icons/md";
 import { RiArrowGoBackFill } from "react-icons/ri";
 import { useParams } from "react-router-dom";
+import { MdScience } from "react-icons/md";
 
 import { useDagServiceGetDagDetails, useDagServiceGetLatestRunInfo } from "openapi/queries";
 import { ApiError } from "openapi/requests/core/ApiError";
@@ -54,6 +55,7 @@ export const Dag = () => {
     { icon: <MdOutlineEventNote />, label: translate("tabs.auditLog"), value: "events" },
     { icon: <FiCode />, label: translate("tabs.code"), value: "code" },
     { icon: <MdDetails />, label: translate("tabs.details"), value: "details" },
+    { icon: <MdScience />, label: "Simulation", value: "simulation" },
     ...externalTabs,
   ];
 
