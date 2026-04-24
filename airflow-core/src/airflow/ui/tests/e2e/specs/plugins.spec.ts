@@ -16,57 +16,48 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { expect, test } from "@playwright/test";
-
-import { PluginsPage } from "../pages/PluginsPage";
+import { expect, test } from "tests/e2e/fixtures";
 
 test.describe("Plugins Page", () => {
-  let pluginsPage: PluginsPage;
-
-  test.beforeEach(async ({ page }) => {
-    pluginsPage = new PluginsPage(page);
+  test.beforeEach(async ({ pluginsPage }) => {
     await pluginsPage.navigate();
     await pluginsPage.waitForLoad();
   });
 
-  test("verify plugins page heading is visible", async () => {
+  test("verify plugins page heading is visible", async ({ pluginsPage }) => {
     await expect(pluginsPage.heading).toBeVisible();
   });
 
-  test("verify plugins table is visible", async () => {
+  test("verify plugins table is visible", async ({ pluginsPage }) => {
     await expect(pluginsPage.table).toBeVisible();
   });
 
-  test("verify plugins list displays with data", async () => {
-    const count = await pluginsPage.getPluginCount();
-
-    expect(count).toBeGreaterThan(0);
+  test("verify plugins list has at least one entry", async ({ pluginsPage }) => {
+    await expect(pluginsPage.rows).not.toHaveCount(0);
   });
 
-  test("verify each plugin has a name", async () => {
-    const pluginNames = await pluginsPage.getPluginNames();
+  test("verify each plugin has a name", async ({ pluginsPage }) => {
+    await expect(pluginsPage.rows).not.toHaveCount(0);
+    const count = await pluginsPage.rows.count();
 
-    expect(pluginNames.length).toBeGreaterThan(0);
-
-    for (const name of pluginNames) {
-      expect(name.trim().length).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      await expect(pluginsPage.nameColumn.nth(i)).not.toBeEmpty();
     }
   });
 
-  test("verify each plugin has a source", async () => {
-    const pluginSources = await pluginsPage.getPluginSources();
+  test("verify each plugin has a source", async ({ pluginsPage }) => {
+    await expect(pluginsPage.rows).not.toHaveCount(0);
+    const count = await pluginsPage.rows.count();
 
-    expect(pluginSources.length).toBeGreaterThan(0);
-
-    for (const source of pluginSources) {
-      expect(source.trim().length).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      await expect(pluginsPage.sourceColumn.nth(i)).not.toBeEmpty();
     }
   });
 
-  test("verify plugin names and sources have matching counts", async () => {
-    const pluginNames = await pluginsPage.getPluginNames();
-    const pluginSources = await pluginsPage.getPluginSources();
+  test("verify plugin names and sources have matching counts", async ({ pluginsPage }) => {
+    const rowCount = await pluginsPage.rows.count();
 
-    expect(pluginNames.length).toBe(pluginSources.length);
+    await expect(pluginsPage.nameColumn).toHaveCount(rowCount);
+    await expect(pluginsPage.sourceColumn).toHaveCount(rowCount);
   });
 });

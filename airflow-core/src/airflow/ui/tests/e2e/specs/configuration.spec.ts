@@ -16,31 +16,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { expect, test } from "@playwright/test";
-
-import { ConfigurationPage } from "../pages/configurationpage";
+import { expect, test } from "tests/e2e/fixtures";
 
 test.describe("Configuration Page", () => {
-  let configPage: ConfigurationPage;
-
-  test.beforeEach(async ({ page }) => {
-    configPage = new ConfigurationPage(page);
-    await configPage.navigate();
-    await configPage.waitForLoad();
+  test.beforeEach(async ({ configurationPage }) => {
+    await configurationPage.navigate();
+    await configurationPage.waitForLoad();
   });
 
-  test("verify configuration displays", async () => {
-    await expect(configPage.heading).toBeVisible();
-    await expect(configPage.table).toBeVisible();
+  test("verify configuration displays", async ({ configurationPage }) => {
+    await expect(configurationPage.heading).toBeVisible();
+    await expect(configurationPage.table).toBeVisible();
 
-    const count = await configPage.getRowCount();
+    await expect(configurationPage.rows).not.toHaveCount(0);
 
-    expect(count).toBeGreaterThan(0);
+    const firstRow = configurationPage.rows.nth(0);
 
-    const { key, section, value } = await configPage.getRowDetails(0);
-
-    expect(section.length).toBeGreaterThan(0);
-    expect(key.length).toBeGreaterThan(0);
-    expect(value.length).toBeGreaterThan(0);
+    await expect(firstRow.locator("td").nth(0)).not.toBeEmpty();
+    await expect(firstRow.locator("td").nth(1)).not.toBeEmpty();
+    await expect(firstRow.locator("td").nth(2)).not.toBeEmpty();
   });
 });

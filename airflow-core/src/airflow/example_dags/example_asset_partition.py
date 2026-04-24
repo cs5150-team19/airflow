@@ -21,14 +21,15 @@ from typing import TYPE_CHECKING
 
 from airflow.sdk import (
     DAG,
+    AllowedKeyMapper,
     Asset,
     CronPartitionTimetable,
-    DailyMapper,
-    HourlyMapper,
     IdentityMapper,
     PartitionedAssetTimetable,
     ProductMapper,
-    YearlyMapper,
+    StartOfDayMapper,
+    StartOfHourMapper,
+    StartOfYearMapper,
     asset,
     task,
 )
@@ -76,7 +77,7 @@ with DAG(
     dag_id="clean_and_combine_player_stats",
     schedule=PartitionedAssetTimetable(
         assets=team_a_player_stats & team_b_player_stats & team_c_player_stats,
-        default_partition_mapper=HourlyMapper(),
+        default_partition_mapper=StartOfHourMapper(),
     ),
     catchup=False,
     tags=["player-stats", "cleanup"],
@@ -84,7 +85,7 @@ with DAG(
     """
     Combine hourly partitions from Team A, B and C into a single curated dataset.
 
-    This Dag demonstrates multi-asset partition alignment using HourlyMapper.
+    This Dag demonstrates multi-asset partition alignment using StartOfHourMapper.
     """
 
     @task(outlets=[combined_player_stats])
@@ -100,7 +101,7 @@ with DAG(
 @asset(
     uri="file://analytics/player-stats/computed-player-odds.csv",
     # Fallback to IdentityMapper if no partition_mapper is specified.
-    # If we want to other temporal mapper (e.g., HourlyMapper) here,
+    # If we want to other temporal mapper (e.g., StartOfHourMapper) here,
     # make sure the input_format is changed since the partition_key is now in "%Y-%m-%dT%H" format
     # instead of a valid timestamp
     schedule=PartitionedAssetTimetable(assets=combined_player_stats),
@@ -120,9 +121,9 @@ with DAG(
     schedule=PartitionedAssetTimetable(
         assets=(combined_player_stats & team_a_player_stats & Asset.ref(name="team_b_player_stats")),
         partition_mapper_config={
-            combined_player_stats: YearlyMapper(),  # incompatible on purpose
-            team_a_player_stats: HourlyMapper(),
-            Asset.ref(name="team_b_player_stats"): HourlyMapper(),
+            combined_player_stats: StartOfYearMapper(),  # incompatible on purpose
+            team_a_player_stats: StartOfHourMapper(),
+            Asset.ref(name="team_b_player_stats"): StartOfHourMapper(),
         },
     ),
     catchup=False,
@@ -163,7 +164,7 @@ with DAG(
     dag_id="aggregate_regional_sales",
     schedule=PartitionedAssetTimetable(
         assets=regional_sales,
-        default_partition_mapper=ProductMapper(IdentityMapper(), DailyMapper()),
+        default_partition_mapper=ProductMapper(IdentityMapper(), StartOfDayMapper()),
     ),
     catchup=False,
     tags=["sales", "aggregation"],
@@ -172,7 +173,7 @@ with DAG(
     Aggregate regional sales using ProductMapper.
 
     The ProductMapper splits the composite key "region|timestamp" and applies
-    IdentityMapper to the region segment and DailyMapper to the timestamp segment,
+    IdentityMapper to the region segment and StartOfDayMapper to the timestamp segment,
     aligning hourly partitions to daily granularity per region.
     """
 
@@ -184,3 +185,43 @@ with DAG(
         print(dag_run.partition_key)
 
     aggregate_sales()
+
+
+region_raw_stats = Asset(uri="file://incoming/player-stats/by-region.csv", name="region_raw_stats")
+
+
+with DAG(
+    dag_id="ingest_region_stats",
+    schedule=None,
+    tags=["player-stats", "regional"],
+):
+    """
+    Ingest player statistics per region.
+
+    Externally triggered with partition_key set to a region code (``us``, ``eu``, ``apac``).
+    """
+
+    @task(outlets=[region_raw_stats])
+    def ingest_region():
+        """Materialize player statistics for a single region partition."""
+        pass
+
+    ingest_region()
+
+
+@asset(
+    uri="file://analytics/player-stats/regional-breakdown.csv",
+    schedule=PartitionedAssetTimetable(
+        assets=region_raw_stats,
+        default_partition_mapper=AllowedKeyMapper(["us", "eu", "apac"]),
+    ),
+    tags=["player-stats", "regional"],
+)
+def regional_stats_breakdown():
+    """
+    Aggregate regional player statistics.
+
+    This asset demonstrates AllowedKeyMapper, which validates that upstream partition
+    keys belong to a fixed set of allowed values (``us``, ``eu``, ``apac``) rather than time-based partitions.
+    """
+    pass

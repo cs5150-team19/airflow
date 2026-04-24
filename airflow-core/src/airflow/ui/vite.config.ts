@@ -16,7 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import react from "@vitejs/plugin-react";
+import babel from "@rolldown/plugin-babel";
+import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import cssInjectedByJsPlugin from "vite-plugin-css-injected-by-js";
 import { defineConfig } from "vitest/config";
 
@@ -33,13 +34,12 @@ export default defineConfig({
       transformIndexHtml: (html, ctx) =>
         html.replace(
           `{{ backend_server_base_url }}`,
-          ctx.server ? `/` : `http://localhost:28080/`
+          ctx.server ? `/` : `http://localhost:28080/`,
         ),
     },
-    react({
-      babel: {
-        plugins: ["babel-plugin-react-compiler"],
-      },
+    react(),
+    babel({
+      presets: [reactCompilerPreset()],
     }),
     // Replace the directory to work with the flask plugin generation
     {
@@ -51,20 +51,24 @@ export default defineConfig({
   ],
   resolve: { alias: { openapi: "/openapi-gen", src: "/src" } },
   server: {
-    cors: true,
+    cors: true, // Only used by the dev server.
     host: true,
     proxy: {
       "/api": {
-        target: "http://localhost:28080",
         changeOrigin: true,
+        target: "http://localhost:28080",
       },
-      "/ui": {
-        target: "http://localhost:28080",
+      "/hitl-review": {
         changeOrigin: true,
+        target: "http://localhost:28080",
       },
       "/static": {
-        target: "http://localhost:28080",
         changeOrigin: true,
+        target: "http://localhost:28080",
+      },
+      "/ui": {
+        changeOrigin: true,
+        target: "http://localhost:28080",
       },
     },
   },

@@ -36,6 +36,7 @@ import { TrendCountButton } from "src/components/TrendCountButton";
 import { dagRunsLimitKey } from "src/constants/localStorage";
 import { SearchParamsKeys } from "src/constants/searchParams";
 import { useGridRuns } from "src/queries/useGridRuns.ts";
+import { isStatePending, useAutoRefresh } from "src/utils";
 
 const FailedLogs = lazy(() => import("./FailedLogs"));
 
@@ -59,7 +60,10 @@ export const Overview = () => {
     state: ["failed"],
   });
 
+  const failedTaskCount = failedTasks?.total_entries ?? 0;
+
   const [limit] = useLocalStorage<number>(dagRunsLimitKey(dagId ?? ""), 10);
+
   const { data: failedRuns, isLoading: isLoadingFailedRuns } = useDagRunServiceGetDagRuns({
     dagId: dagId ?? "",
     limit,
@@ -68,6 +72,9 @@ export const Overview = () => {
     state: ["failed"],
   });
   const { data: gridRuns, isLoading: isLoadingRuns } = useGridRuns({ limit });
+  const refetchInterval = useAutoRefresh({ dagId });
+  const isAutoRefreshing =
+    Boolean(refetchInterval) && (gridRuns ?? []).some((run) => isStatePending(run.state));
   const { data: assetEventsData, isLoading: isLoadingAssetEvents } = useAssetServiceGetAssetEvents({
     limit,
     orderBy: [assetSortBy],
@@ -90,14 +97,14 @@ export const Overview = () => {
       </Box>
       <HStack flexWrap="wrap">
         <TrendCountButton
-          colorPalette={(failedTasks?.total_entries ?? 0) === 0 ? "green" : "failed"}
-          count={failedTasks?.total_entries ?? 0}
+          colorPalette={failedTaskCount === 0 ? "green" : "failed"}
+          count={failedTaskCount}
           endDate={endDate}
           events={(failedTasks?.task_instances ?? []).map((ti) => ({
             timestamp: ti.start_date ?? ti.logical_date,
           }))}
           isLoading={isLoading}
-          label={translate("overview.buttons.failedTask", { count: failedTasks?.total_entries ?? 0 })}
+          label={translate("overview.buttons.failedTask", { count: failedTaskCount })}
           route={{
             pathname: "tasks",
             search: `${SearchParamsKeys.STATE}=failed`,
@@ -125,7 +132,11 @@ export const Overview = () => {
           {isLoadingRuns ? (
             <Skeleton height="200px" w="full" />
           ) : (
-            <DurationChart entries={gridRuns?.slice().reverse()} kind="Dag Run" />
+            <DurationChart
+              entries={gridRuns?.slice().reverse()}
+              isAutoRefreshing={isAutoRefreshing}
+              kind="Dag Run"
+            />
           )}
         </Box>
         {assetEventsData && assetEventsData.total_entries > 0 ? (

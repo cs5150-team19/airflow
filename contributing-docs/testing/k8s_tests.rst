@@ -25,7 +25,9 @@ deploy and run the cluster tests in our repository and into Breeze development e
 KinD has a really nice ``kind`` tool that you can use to interact with the cluster. Run ``kind --help`` to
 learn more.
 
-**The outline for this document in GitHub is available at top-right corner button (with 3-dots and 3 lines).**
+.. contents:: Table of Contents
+   :depth: 2
+   :local:
 
 K8S test environment
 --------------------
@@ -88,6 +90,18 @@ configure cluster (via ``create-cluster``, ``configure-cluster`` command). Those
 In order to deploy Airflow, the PROD image of Airflow need to be extended and example dags and POD
 template files should be added to the image. This is done via ``build-k8s-image``, ``upload-k8s-image``.
 This can also be done for all/selected images/clusters in parallel via ``--run-in-parallel`` flag.
+
+.. note::
+
+   Before running ``breeze k8s build-k8s-image`` command, make sure that all UI assets are compiled by checking
+   if ``airflow-core/src/airflow/ui/dist`` is not empty. If the mentioned directory is empty, run following
+   command:
+
+   .. code-block:: shell
+
+      breeze ui compile-assets
+
+   for making sure that all assets are up-to-date, run the above command with ``--force-clean`` flag.
 
 Deploy Airflow to Kubernetes Cluster
 ------------------------------------
@@ -213,8 +227,12 @@ You can exit k9s by pressing Ctrl-C.
 Typical testing pattern for Kubernetes tests
 --------------------------------------------
 
-The typical session for tests with Kubernetes looks like follows:
+.. note::
 
+   Steps 1-6 from below instruction can be done by using one command ``breeze k8s deploy-cluster``.
+   For details visit `Test commands <../../dev/breeze/doc/05_test_commands.rst>`__.
+
+The typical session for tests with Kubernetes looks like follows:
 
 1. Prepare the environment:
 
@@ -417,7 +435,7 @@ Should show the status of current KinD cluster.
     breeze k8s upload-k8s-image
 
 
-5. Upload the image to KinD cluster - this uploads your image to make it available for the KinD cluster.
+6. Upload the image to KinD cluster - this uploads your image to make it available for the KinD cluster.
 
 .. code-block:: bash
 

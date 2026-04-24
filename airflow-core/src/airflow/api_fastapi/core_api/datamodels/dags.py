@@ -33,7 +33,7 @@ from pydantic import (
     field_validator,
 )
 
-from airflow.api_fastapi.core_api.base import BaseModel, StrictBaseModel
+from airflow.api_fastapi.core_api.base import BaseModel, StrictBaseModel, make_partial_model
 from airflow.api_fastapi.core_api.datamodels.dag_tags import DagTagResponse
 from airflow.api_fastapi.core_api.datamodels.dag_versions import DagVersionResponse
 from airflow.configuration import conf
@@ -89,6 +89,7 @@ class DAGResponse(BaseModel):
     timetable_summary: str | None
     timetable_description: str | None
     timetable_partitioned: bool
+    timetable_periodic: bool
     tags: list[DagTagResponse]
     max_active_tasks: int
     max_active_runs: int | None
@@ -131,6 +132,17 @@ class DAGResponse(BaseModel):
     # Mypy issue https://github.com/python/mypy/issues/1362
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def is_backfillable(self) -> bool:
+        """Whether this DAG's schedule supports backfilling."""
+        if not self.timetable_periodic:
+            return False
+        if self.allowed_run_types is not None and DagRunType.BACKFILL_JOB not in self.allowed_run_types:
+            return False
+        return True
+
+    # Mypy issue https://github.com/python/mypy/issues/1362
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def file_token(self) -> str:
         """Return file token."""
         payload = {
@@ -144,6 +156,9 @@ class DAGPatchBody(StrictBaseModel):
     """Dag Serializer for updatable bodies."""
 
     is_paused: bool
+
+
+DAGPatchBodyPartial = make_partial_model(DAGPatchBody)
 
 
 class DAGCollectionResponse(BaseModel):
