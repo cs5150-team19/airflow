@@ -18,17 +18,21 @@
  */
 import { Center, Flex } from "@chakra-ui/react";
 import { useRef, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 
 import { useContainerWidth } from "src/utils";
 
 type Props = {
   readonly tabs: Array<{ icon?: ReactNode; label: string; value: string }>;
+  readonly isSimulating?: boolean;
 };
 
 export const NavTabs = ({ tabs }: Props) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const containerWidth = useContainerWidth(containerRef);
+  const [searchParams] = useSearchParams();
+  const simulationId = searchParams.get("simulation_id");
+  const search = simulationId === null ? "" : `?${new URLSearchParams({ simulation_id: simulationId }).toString()}`;
 
   return (
     <Flex
@@ -43,9 +47,7 @@ export const NavTabs = ({ tabs }: Props) => {
           end
           key={value}
           title={label}
-          to={{
-            pathname: value,
-          }}
+          to={{ pathname: value, search }} // preserve simulation context across tabs
         >
           {({ isActive }) => (
             <Center
@@ -55,7 +57,7 @@ export const NavTabs = ({ tabs }: Props) => {
               color={isActive ? "fg" : "fg.muted"}
               fontWeight="bold"
               height="40px"
-              mb="-2px" // Show the border on top of its parent's border
+              mb="-2px"
               pb={isActive ? 0 : "3px"}
               px={4}
               transition="all 0.2s ease"

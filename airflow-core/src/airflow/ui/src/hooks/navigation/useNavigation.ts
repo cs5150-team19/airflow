@@ -70,15 +70,22 @@ const buildPath = (params: {
   pathname: string;
   run: GridRunsResponse;
   task: GridTask;
+  isSimulating: boolean;   
 }): string => {
-  const { dagId, mapIndex = "-1", mode, pathname, run, task } = params;
-  const groupPath = task.isGroup ? "group/" : "";
+  const { dagId, mapIndex = "-1", mode, pathname, run, task, isSimulating } = params;
 
   switch (mode) {
     case NavigationModes.RUN:
-      return `/dags/${dagId}/runs/${run.run_id}`;
+      return isSimulating 
+        ? `/dags/${dagId}/simulation/runs/${run.run_id}`
+        : `/dags/${dagId}/runs/${run.run_id}`;
+
     case NavigationModes.TASK:
-      return `/dags/${dagId}/tasks/${groupPath}${task.id}`;
+      const groupPath = task.isGroup ? "group/" : "";
+      return isSimulating
+        ? `/dags/${dagId}/simulation/tasks/${groupPath}${task.id}`
+        : `/dags/${dagId}/tasks/${groupPath}${task.id}`;
+
     case NavigationModes.TI:
       return buildTaskInstanceUrl({
         currentPathname: pathname,
@@ -88,7 +95,9 @@ const buildPath = (params: {
         mapIndex,
         runId: run.run_id,
         taskId: task.id,
+        isSimulating: isSimulating,
       });
+
     default:
       return `/dags/${dagId}`;
   }
@@ -100,6 +109,8 @@ export const useNavigation = ({ onToggleGroup, runs, tasks }: UseNavigationProps
   const navigate = useNavigate();
   const location = useLocation();
   const [mode, setMode] = useState<NavigationMode>(NavigationModes.TI);
+
+  const isSimulating = location.pathname.includes("/simulation");
 
   useEffect(() => {
     const detectedMode = detectModeFromUrl(globalThis.location.pathname);
@@ -166,7 +177,7 @@ export const useNavigation = ({ onToggleGroup, runs, tasks }: UseNavigationProps
     const task = tasks[newTaskIndex];
 
     if (run && task) {
-      const path = buildPath({ dagId, mapIndex, mode, pathname: location.pathname, run, task });
+      const path = buildPath({ dagId, mapIndex, mode, pathname: location.pathname, run, task, isSimulating });
 
       void Promise.resolve(navigate(path, { replace: true }));
 

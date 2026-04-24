@@ -20,9 +20,11 @@ import { Box, Flex } from "@chakra-ui/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import dayjs from "dayjs";
 import dayjsDuration from "dayjs/plugin/duration";
-import { useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { FiChevronsRight } from "react-icons/fi";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import type { RefObject } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
 
 import type { DagRunState, DagRunType, GridRunsResponse } from "openapi/requests";
 import type { VersionIndicatorOptions } from "src/constants/showVersionIndicatorOptions";
@@ -32,6 +34,7 @@ import { useGridRuns } from "src/queries/useGridRuns.ts";
 import { useGridStructure } from "src/queries/useGridStructure.ts";
 import { useGridTiSummariesStream } from "src/queries/useGridTISummaries.ts";
 import { isStatePending } from "src/utils";
+import { getSimulationDisplayOptions, getSimulationTaskDisplayMetadata } from "src/utils/simulationDisplay";
 
 import { Bar } from "./Bar";
 import { DurationAxis } from "./DurationAxis";
@@ -48,6 +51,7 @@ dayjs.extend(dayjsDuration);
 
 type Props = {
   readonly dagRunState?: DagRunState | undefined;
+  readonly isSimulating?: boolean;
   readonly limit: number;
   readonly offset: number;
   readonly onJumpToLatest: () => void;
@@ -65,6 +69,7 @@ const GRID_INNER_SCROLL_PADDING_START_PX = GRID_HEADER_PADDING_PX + GRID_HEADER_
 
 export const Grid = ({
   dagRunState,
+  isSimulating = false,
   limit,
   offset,
   onJumpToLatest,
@@ -85,12 +90,17 @@ export const Grid = ({
   const { openGroupIds, toggleGroupId } = useOpenGroups();
   const { dagId = "" } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  // The prop is set by DetailsLayout; fall back to URL detection so Grid
+  // works correctly regardless of which parent layout renders it.
+  const isSimulatingResolved = isSimulating || location.pathname.includes("/simulation");
 
   const filterRoot = searchParams.get("root") ?? undefined;
   const includeUpstream = searchParams.get("upstream") === "true";
   const includeDownstream = searchParams.get("downstream") === "true";
   const depthParam = searchParams.get("depth");
   const depth = depthParam !== null && depthParam !== "" ? parseInt(depthParam, 10) : undefined;
+  const simulationDisplayOptions = getSimulationDisplayOptions(searchParams);
 
   // Over fetch gridRuns and then truncate to limit, in order to check pagination
   const { data: dataGridRuns, isLoading } = useGridRuns({
@@ -141,24 +151,26 @@ export const Grid = ({
     showVersionIndicatorMode,
   });
 
-  const { flatNodes } = flattenNodes(dagStructure, openGroupIds);
+  const { flatNodes } = useMemo(() => {
+    const flattened = flattenNodes(dagStructure, openGroupIds);
+    const simulationMetadataByTaskId = getSimulationTaskDisplayMetadata(
+      flattened.flatNodes.filter((node) => !node.isGroup).map((node) => node.id),
+      simulationDisplayOptions,
+    );
 
-  const taskNameColumnWidthPx = showGantt ? estimateTaskNameColumnWidthPx(flatNodes) : undefined;
+    return {
+      flatNodes: flattened.flatNodes.map((node) => {
+        const simulationMetadata = simulationMetadataByTaskId[node.id];
 
-  const taskNameColumnStyles =
-    showGantt && taskNameColumnWidthPx !== undefined
-      ? {
-          flexGrow: 0,
-          flexShrink: 0,
-          maxW: `${taskNameColumnWidthPx}px`,
-          minW: `${taskNameColumnWidthPx}px`,
-          width: `${taskNameColumnWidthPx}px`,
-        }
-      : {
-          flexGrow: 1,
-          flexShrink: 0,
-          minW: "200px",
+        return {
+          ...node,
+          isBottleneck: simulationMetadata?.isBottleneck ?? false,
+          isCriticalPath: simulationMetadata?.isCriticalPath ?? false,
+          simulationMetricLabel: simulationMetadata?.metricLabel,
         };
+      }),
+    };
+  }, [dagStructure, openGroupIds, simulationDisplayOptions]);
 
   const { setMode } = useNavigation({
     onToggleGroup: toggleGroupId,
@@ -260,21 +272,84 @@ export const Grid = ({
       tabIndex={0}
       w={showGantt ? "fit-content" : "full"}
     >
-      {usesSharedScroll ? (
-        gridHeaderAndBody
-      ) : (
-        <Box
-          flex={1}
-          marginRight={showGantt ? 0 : 1}
-          minH={0}
-          overflow="auto"
-          paddingRight={showGantt ? 0 : 6}
-          position="relative"
-          ref={scrollContainerRef}
-        >
-          {gridHeaderAndBody}
-        </Box>
-      )}
+      {/* Grid scroll container */}
+      <Box
+        height="calc(100vh - 140px)"
+        marginRight={showGantt ? 0 : 1}
+        overflow="auto"
+        paddingRight={showGantt ? 0 : 4}
+        position="relative"
+        ref={scrollContainerRef}
+      >
+        {/* Grid header, both bgs are needed to hide elements during horizontal and vertical scroll */}
+        <Flex bg="bg" display="flex" position="sticky" pt={`${GRID_HEADER_PADDING_PX}px`} top={0} zIndex={2}>
+          <Box bg="bg" flexGrow={1} left={0} minWidth="200px" position="sticky" zIndex={1}>
+            <Flex flexDirection="column-reverse" height={`${GRID_HEADER_HEIGHT_PX}px`} position="relative">
+              {Boolean(gridRuns?.length) && (
+                <>
+                  <DurationTick bottom={`${GRID_HEADER_HEIGHT_PX - 8}px`} duration={max} />
+                  <DurationTick bottom={`${GRID_HEADER_HEIGHT_PX / 2 - 4}px`} duration={max / 2} />
+                </>
+              )}
+            </Flex>
+          </Box>
+          {/* Duration bars */}
+          <Flex flexDirection="row-reverse" flexShrink={0}>
+            <Flex flexShrink={0} position="relative">
+              <DurationAxis top={`${GRID_HEADER_HEIGHT_PX}px`} />
+              <DurationAxis top={`${GRID_HEADER_HEIGHT_PX / 2}px`} />
+              <DurationAxis top="4px" />
+              <Flex flexDirection="row-reverse">
+                {runsWithVersionFlags?.map((dr) => (
+                  <Bar
+                    key={dr.run_id}
+                    max={max}
+                    onClick={handleColumnClick}
+                    run={dr}
+                    showVersionIndicatorMode={showVersionIndicatorMode}
+                  />
+                ))}
+              </Flex>
+              {selectedIsVisible === undefined || !selectedIsVisible ? undefined : (
+                <Link to={isSimulatingResolved ? `/dags/${dagId}/simulation` : `/dags/${dagId}`}>
+                  <IconButton
+                    aria-label={translate("grid.buttons.resetToLatest")}
+                    height={`${GRID_HEADER_HEIGHT_PX - 2}px`}
+                    loading={isLoading}
+                    minW={0}
+                    ml={1}
+                    title={translate("grid.buttons.resetToLatest")}
+                    variant="surface"
+                    zIndex={1}
+                  >
+                    <FiChevronsRight />
+                  </IconButton>
+                </Link>
+              )}
+            </Flex>
+          </Flex>
+        </Flex>
+
+        {/* Grid body */}
+        <Flex height={`${rowVirtualizer.getTotalSize()}px`} position="relative">
+          <Box bg="bg" flexGrow={1} flexShrink={0} left={0} minWidth="200px" position="sticky" zIndex={1}>
+            <TaskNames isSimulating={isSimulatingResolved} nodes={flatNodes} onRowClick={handleRowClick} virtualItems={virtualItems} />
+          </Box>
+          <Flex flexDirection="row-reverse" flexShrink={0}>
+            {gridRuns?.map((dr: GridRunsResponse) => (
+              <TaskInstancesColumn
+                key={dr.run_id}
+                isSimulating={isSimulatingResolved}
+                nodes={flatNodes}
+                onCellClick={handleCellClick}
+                run={dr}
+                showVersionIndicatorMode={showVersionIndicatorMode}
+                virtualItems={virtualItems}
+              />
+            ))}
+          </Flex>
+        </Flex>
+      </Box>
     </Flex>
   );
 };

@@ -18,12 +18,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, Button, Flex, HStack, IconButton, useDisclosure } from "@chakra-ui/react";
+import { Box, HStack, Flex, useDisclosure, IconButton, Button} from "@chakra-ui/react";
 import { useReactFlow } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import type { PropsWithChildren, ReactNode, RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { FiPlay } from "react-icons/fi";
 import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { LuFileWarning } from "react-icons/lu";
 import {
@@ -34,6 +33,7 @@ import {
 } from "react-resizable-panels";
 import { Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "usehooks-ts";
+import { useMemo } from 'react';
 
 import {
   useDagRunServiceGetDagRun,
@@ -102,7 +102,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
   const { dagId = "", runId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const isSimulating = location.pathname.endsWith("/simulation");
+  const isSimulating = location.pathname.includes("/simulation");
 
   const { data: dag } = useDagServiceGetDag({ dagId });
   const [dagView, setDagView] = useLocalStorage<DagView>(DEFAULT_DAG_VIEW_KEY, "grid");
@@ -221,6 +221,13 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
   // Treat "gantt" as "grid" for panel layout persistence so switching between them doesn't reset sizes.
   const panelViewKey = dagView === "gantt" ? "grid" : dagView;
 
+  const filteredTabs = useMemo(() => {
+    if (isSimulating) {
+      return tabs.filter(tab => tab.value !== "events" && tab.value !== "backfills" && tab.value !== "calendar");
+    }
+    return tabs;
+  }, [tabs, isSimulating]);
+
   return (
     <HoverProvider>
       <OpenGroupsProvider dagId={dagId}>
@@ -312,49 +319,21 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
                   setShowVersionIndicatorMode={setShowVersionIndicatorMode}
                   showVersionIndicatorMode={showVersionIndicatorMode}
                 />
-                <Box flex={1} minH={0} overflow="hidden">
-                  {dagView === "graph" ? (
-                    <Graph />
-                  ) : dagView === "gantt" && Boolean(runId) ? (
-                    <SharedScrollBox scrollRef={sharedGridGanttScrollRef}>
-                      <Flex alignItems="flex-start" gap={0} maxW="100%" minW={0} overflow="clip" w="100%">
-                        <Grid
-                          dagRunState={dagRunStateFilter}
-                          limit={limit}
-                          offset={offset}
-                          onJumpToLatest={handleJumpToLatest}
-                          runAfterGte={runAfterGte}
-                          runAfterLte={runAfterLte}
-                          runType={runTypeFilter}
-                          setOffset={setOffset}
-                          sharedScrollContainerRef={sharedGridGanttScrollRef}
-                          showGantt
-                          showVersionIndicatorMode={showVersionIndicatorMode}
-                          triggeringUser={triggeringUserFilter}
-                        />
-                        <Gantt
-                          dagRunState={dagRunStateFilter}
-                          limit={limit}
-                          offset={offset}
-                          runAfterGte={runAfterGte}
-                          runAfterLte={runAfterLte}
-                          runType={runTypeFilter}
-                          sharedScrollContainerRef={sharedGridGanttScrollRef}
-                          triggeringUser={triggeringUserFilter}
-                        />
-                      </Flex>
-                    </SharedScrollBox>
-                  ) : (
-                    <HStack
-                      alignItems="flex-start"
-                      gap={0}
-                      height="100%"
-                      maxW="100%"
-                      minW={0}
-                      overflow="hidden"
-                      w="100%"
-                    >
-                      <Grid
+                {dagView === "graph" ? (
+                  <Graph />
+                ) : (
+                  <HStack alignItems="flex-start" gap={0}>
+                    <Grid
+                      dagRunState={dagRunStateFilter}
+                      isSimulating={isSimulating}
+                      limit={limit}
+                      runType={runTypeFilter}
+                      showGantt={Boolean(runId) && showGantt}
+                      showVersionIndicatorMode={showVersionIndicatorMode}
+                      triggeringUser={triggeringUserFilter}
+                    />
+                    {showGantt ? (
+                      <Gantt
                         dagRunState={dagRunStateFilter}
                         limit={limit}
                         offset={offset}
@@ -446,7 +425,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
                       </>
                     ) : undefined}
                     <ProgressBar size="xs" visibility={isLoading ? "visible" : "hidden"} />
-                    <NavTabs tabs={tabs} />
+                    <NavTabs tabs={filteredTabs} isSimulating={isSimulating} />
                     <Box flexGrow={1} overflow="auto" px={2}>
                       <Outlet />
                     </Box>

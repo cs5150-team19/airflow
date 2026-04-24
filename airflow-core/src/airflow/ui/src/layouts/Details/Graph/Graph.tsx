@@ -46,6 +46,7 @@ import { flattenGraphNodes } from "src/layouts/Details/Grid/utils.ts";
 import { useDependencyGraph } from "src/queries/useDependencyGraph";
 import { useGridTiSummariesStream } from "src/queries/useGridTISummaries.ts";
 import { getReactFlowThemeStyle } from "src/theme";
+import { getSimulationDisplayOptions, getSimulationTaskDisplayMetadata } from "src/utils/simulationDisplay";
 
 // Hoisted to module scope so ReactFlow receives a stable reference and skips
 // its internal shallow-equality check on every render.
@@ -122,6 +123,7 @@ export const Graph = () => {
   const includeDownstream = searchParams.get("downstream") === "true";
   const depthParam = searchParams.get("depth");
   const depth = depthParam !== null && depthParam !== "" ? parseInt(depthParam, 10) : undefined;
+  const simulationDisplayOptions = getSimulationDisplayOptions(searchParams);
 
   const hasActiveFilter = includeUpstream || includeDownstream;
 
@@ -187,26 +189,29 @@ export const Graph = () => {
     versionNumber: selectedVersion,
   });
 
-  const { data: dagRun } = useDagRunServiceGetDagRun({ dagId, dagRunId: runId }, undefined, {
-    enabled: Boolean(runId),
-  });
-
-  const { summariesByRunId } = useGridTiSummariesStream({
-    dagId,
-    runIds: runId ? [runId] : [],
-    states: dagRun ? [dagRun.state] : undefined,
-  });
-  const gridTISummaries = runId ? summariesByRunId.get(runId) : undefined;
+  const { data: gridTISummaries } = useGridTiSummaries({ dagId, runId });
+  const simulationMetadataByTaskId = getSimulationTaskDisplayMetadata(
+    (data?.nodes ?? []).filter((node) => node.type === "task").map((node) => node.id),
+    simulationDisplayOptions,
+    (data?.edges ?? []).map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+    })),
+  );
 
   // Add task instances and selection state to node data without recalculating layout.
   const nodes = data?.nodes.map((node) => {
     const taskInstance = gridTISummaries?.task_instances.find((ti) => ti.task_id === node.id);
+    const simulationMetadata = simulationMetadataByTaskId[node.id];
 
     return {
       ...node,
       data: {
         ...node.data,
+        isBottleneck: simulationMetadata?.isBottleneck ?? false,
+        isCriticalPath: simulationMetadata?.isCriticalPath ?? false,
         isSelected: node.id === taskId || node.id === groupId || node.id === `dag:${dagId}`,
+        simulationMetricLabel: simulationMetadata?.metricLabel,
         taskInstance,
       },
     };

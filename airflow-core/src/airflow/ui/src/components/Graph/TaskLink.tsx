@@ -17,7 +17,7 @@
  * under the License.
  */
 import { forwardRef } from "react";
-import { useParams, useSearchParams, Link as RouterLink } from "react-router-dom";
+import { useLocation, useParams, useSearchParams, Link as RouterLink } from "react-router-dom";
 
 import { TaskName, type TaskNameProps } from "src/components/TaskName";
 import { taskNodeSeparator } from "src/utils/assetGraph";
@@ -29,7 +29,9 @@ type Props = {
 
 export const TaskLink = forwardRef<HTMLAnchorElement, Props>(({ id, isGroup, isMapped, ...rest }, ref) => {
   const { dagId: urlDagId = "", groupId, runId, taskId: urlTaskId } = useParams();
+  const { pathname } = useLocation();
   const [searchParams] = useSearchParams();
+  const simulationPath = pathname.includes("/simulation") ? "/simulation" : "";
 
   // Extract dagId and taskId from composite ID
   const parseCompositeId = (compositeId: string) => {
@@ -46,7 +48,7 @@ export const TaskLink = forwardRef<HTMLAnchorElement, Props>(({ id, isGroup, isM
   const dagId = extractedDagId ?? urlDagId;
   const taskId = extractedTaskId ?? id;
 
-  const basePath = `/dags/${dagId}${runId === undefined ? "" : `/runs/${runId}`}`;
+  const basePath = `/dags/${dagId}${simulationPath}${runId === undefined ? "" : `/runs/${runId}`}`;
   const taskPath = isGroup
     ? groupId === taskId
       ? ""
