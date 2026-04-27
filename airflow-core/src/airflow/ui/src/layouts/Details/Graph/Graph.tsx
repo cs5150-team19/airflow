@@ -27,10 +27,10 @@ import {
   type Node as ReactFlowNode,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdCenterFocusStrong } from "react-icons/md";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "usehooks-ts";
 
 import { useDagRunServiceGetDagRun, useStructureServiceStructureData } from "openapi/queries";
@@ -46,7 +46,11 @@ import { flattenGraphNodes } from "src/layouts/Details/Grid/utils.ts";
 import { useDependencyGraph } from "src/queries/useDependencyGraph";
 import { useGridTiSummariesStream } from "src/queries/useGridTISummaries.ts";
 import { getReactFlowThemeStyle } from "src/theme";
-import { getSimulationDisplayOptions, getSimulationTaskDisplayMetadata } from "src/utils/simulationDisplay";
+import {
+  getSimulationDisplayOptions,
+  getSimulationTaskDisplayMetadata,
+  type SimulationReportLike,
+} from "src/utils/simulationDisplay";
 
 // Hoisted to module scope so ReactFlow receives a stable reference and skips
 // its internal shallow-equality check on every render.
@@ -111,10 +115,46 @@ const nodeColor = (
   return "";
 };
 
+const getLatestSimulationId = (dagId: string): string | null => {
+  if (!dagId) {
+    return null;
+  }
+
+  const raw = globalThis.localStorage.getItem(`airflow.latestSimulation.${dagId}`);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { simulationId?: string };
+    return parsed.simulationId ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchSimulationReport = async (dagId: string, simulationId: string): Promise<SimulationReportLike | undefined> => {
+  const response = await fetch(
+    `/api/v2/dags/${encodeURIComponent(dagId)}/simulate/${encodeURIComponent(simulationId)}`,
+  );
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  return response.json() as Promise<SimulationReportLike>;
+};
+
 export const Graph = () => {
   const { colorMode = "light" } = useColorMode();
   const { dagId = "", groupId, runId = "", taskId } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const isSimulating = location.pathname.includes("/simulation");
+  const simulationId = searchParams.get("simulation_id");
+  const [simulationReport, setSimulationReport] = useState<SimulationReportLike | undefined>(undefined);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const selectedVersion = useSelectedVersion();
 
@@ -124,6 +164,48 @@ export const Graph = () => {
   const depthParam = searchParams.get("depth");
   const depth = depthParam !== null && depthParam !== "" ? parseInt(depthParam, 10) : undefined;
   const simulationDisplayOptions = getSimulationDisplayOptions(searchParams);
+
+  useEffect(() => {
+    const onSimulationTriggered = (event: Event) => {
+      const simulationEvent = event as CustomEvent<{ dagId: string }>;
+
+      if (simulationEvent.detail?.dagId === dagId) {
+        setRefreshToken((value: number) => value + 1);
+      }
+    };
+
+    globalThis.addEventListener("airflow:simulation-triggered", onSimulationTriggered);
+
+    return () => {
+      globalThis.removeEventListener("airflow:simulation-triggered", onSimulationTriggered);
+    };
+  }, [dagId]);
+
+  useEffect(() => {
+    if (!isSimulating || !dagId) {
+      setSimulationReport(undefined);
+      return;
+    }
+
+    const selectedSimulationId = simulationId ?? getLatestSimulationId(dagId);
+
+    if (!selectedSimulationId) {
+      setSimulationReport(undefined);
+      return;
+    }
+
+    let isCancelled = false;
+
+    void fetchSimulationReport(dagId, selectedSimulationId).then((report) => {
+      if (!isCancelled) {
+        setSimulationReport(report);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [dagId, isSimulating, simulationId, refreshToken]);
 
   const hasActiveFilter = includeUpstream || includeDownstream;
 
@@ -205,6 +287,7 @@ export const Graph = () => {
       source: edge.source,
       target: edge.target,
     })),
+    simulationReport,
   );
 
   // Add task instances and selection state to node data without recalculating layout.

@@ -32,7 +32,11 @@ import { NavigationModes, useNavigation } from "src/hooks/navigation";
 import { useGridRuns } from "src/queries/useGridRuns.ts";
 import { useGridStructure } from "src/queries/useGridStructure.ts";
 import { isStatePending } from "src/utils";
-import { getSimulationDisplayOptions, getSimulationTaskDisplayMetadata } from "src/utils/simulationDisplay";
+import {
+  getSimulationDisplayOptions,
+  getSimulationTaskDisplayMetadata,
+  type SimulationReportLike,
+} from "src/utils/simulationDisplay";
 
 import { Bar } from "./Bar";
 import { DurationAxis } from "./DurationAxis";
@@ -49,6 +53,37 @@ import { useGridRunsWithVersionFlags } from "./useGridRunsWithVersionFlags";
 import { flattenNodes } from "./utils";
 
 dayjs.extend(dayjsDuration);
+
+const getLatestSimulationId = (dagId: string): string | null => {
+  if (!dagId) {
+    return null;
+  }
+
+  const raw = globalThis.localStorage.getItem(`airflow.latestSimulation.${dagId}`);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { simulationId?: string };
+    return parsed.simulationId ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchSimulationReport = async (dagId: string, simulationId: string): Promise<SimulationReportLike | undefined> => {
+  const response = await fetch(
+    `/api/v2/dags/${encodeURIComponent(dagId)}/simulate/${encodeURIComponent(simulationId)}`,
+  );
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  return response.json() as Promise<SimulationReportLike>;
+};
 
 type Props = {
   readonly dagRunState?: DagRunState | undefined;
@@ -87,9 +122,54 @@ export const Grid = ({
   const includeDownstream = searchParams.get("downstream") === "true";
   const depthParam = searchParams.get("depth");
   const depth = depthParam !== null && depthParam !== "" ? parseInt(depthParam, 10) : undefined;
+  const simulationId = searchParams.get("simulation_id");
   const simulationDisplayOptions = getSimulationDisplayOptions(searchParams);
+  const [simulationReport, setSimulationReport] = useState<SimulationReportLike | undefined>(undefined);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const { data: gridRuns, isLoading } = useGridRuns({ dagRunState, limit, runType, triggeringUser });
+
+  useEffect(() => {
+    const onSimulationTriggered = (event: Event) => {
+      const simulationEvent = event as CustomEvent<{ dagId: string }>;
+
+      if (simulationEvent.detail?.dagId === dagId) {
+        setRefreshToken((value: number) => value + 1);
+      }
+    };
+
+    globalThis.addEventListener("airflow:simulation-triggered", onSimulationTriggered);
+
+    return () => {
+      globalThis.removeEventListener("airflow:simulation-triggered", onSimulationTriggered);
+    };
+  }, [dagId]);
+
+  useEffect(() => {
+    if (!isSimulatingResolved || !dagId) {
+      setSimulationReport(undefined);
+      return;
+    }
+
+    const selectedSimulationId = simulationId ?? getLatestSimulationId(dagId);
+
+    if (!selectedSimulationId) {
+      setSimulationReport(undefined);
+      return;
+    }
+
+    let isCancelled = false;
+
+    void fetchSimulationReport(dagId, selectedSimulationId).then((report) => {
+      if (!isCancelled) {
+        setSimulationReport(report);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [dagId, isSimulatingResolved, simulationId, refreshToken]);
 
   // Check if the selected dag run is inside of the grid response, if not, we'll update the grid filters
   // Eventually we should redo the api endpoint to make this work better
@@ -106,7 +186,7 @@ export const Grid = ({
   const { data: dagStructure } = useGridStructure({
     dagRunState,
     depth,
-    hasActiveRun: gridRuns?.some((dr) => isStatePending(dr.state)),
+    hasActiveRun: gridRuns?.some((dr: GridRunsResponse) => isStatePending(dr.state)),
     includeDownstream,
     includeUpstream,
     limit,
@@ -136,6 +216,8 @@ export const Grid = ({
     const simulationMetadataByTaskId = getSimulationTaskDisplayMetadata(
       flattened.flatNodes.filter((node) => !node.isGroup).map((node) => node.id),
       simulationDisplayOptions,
+      undefined,
+      simulationReport,
     );
 
     return {
@@ -150,7 +232,7 @@ export const Grid = ({
         };
       }),
     };
-  }, [dagStructure, openGroupIds, simulationDisplayOptions]);
+  }, [dagStructure, openGroupIds, simulationDisplayOptions, simulationReport]);
 
   const { setMode } = useNavigation({
     onToggleGroup: toggleGroupId,
