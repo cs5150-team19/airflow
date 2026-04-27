@@ -14,12 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Stub critical-path computation for simulation results.
+"""Critical-path computation for simulation simulation results.
 
-Real implementation is tracked as Story D (bottleneck detection / critical path
-via topological sort + dynamic programming). Until that lands, this module
-returns an empty CriticalPathResult so the simulation API endpoint can boot
-and return non-critical-path fields correctly.
+This module calculates a simple longest-path over the DAG task dependency
+graph using estimated runtimes. It produces a critical path, the edges along
+that path, and the task with the longest duration on the path.
 """
 from __future__ import annotations
 

@@ -30,16 +30,36 @@ from airflow.api_fastapi.core_api.datamodels.simulation import (
 )
 from airflow.api_fastapi.core_api.openapi.exceptions import create_openapi_http_exception_doc
 from airflow.api_fastapi.core_api.security import requires_access_dag
+from airflow.exceptions import AirflowException
 from airflow.models.dagrun import DagRun
+from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance as TI
 from airflow.simulation.critical_path import get_critical_path
 from airflow.simulation.predictor_interface import DeterministicPredictor
 from airflow.simulation.predictors.historical_predictor import HistoricalPredictor
+from airflow.utils.state import DagRunState
+from airflow.utils.types import DagRunTriggeredByType, DagRunType
+from airflow._shared.timezones import timezone
 
 simulation_router = AirflowRouter(tags=["Simulation"], prefix="/dags/{dag_id}")
 
 # In-memory store for simulation results (keyed by simulation_id)
 _simulation_results: dict[str, SimulationResponse] = {}
+
+
+def _get_dag_for_dag_run(dag_run: DagRun, dag_id: str, session: SessionDep):
+    if dag_run.dag is not None:
+        return dag_run.dag
+
+    dag = SerializedDagModel.get_dag(dag_id, session=session)
+    if dag is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"No serialized DAG found for dag_id: `{dag_id}`",
+        )
+
+    dag_run.dag = dag
+    return dag
 
 
 @simulation_router.post(
@@ -106,9 +126,13 @@ def run_simulation(
         for te in estimates
     ]
 
-    critical_path_response = get_critical_path(dag_run.get_dag(), task_responses)
-        
+    try:
+        dag = dag_run.get_dag()
+    except AirflowException:
+        dag = _get_dag_for_dag_run(dag_run, dag_id, session)
 
+    critical_path_response = get_critical_path(dag, task_responses)
+        
     response = SimulationResponse(
         simulation_id=simulation_id,
         dag_id=dag_id,
@@ -117,6 +141,22 @@ def run_simulation(
         critical_path=critical_path_response, #bottle neck is returned in this function
         predicted_outcome="success", #TODO: replace with actual model prediction in the future implementation
     )
+
+    simulation_run_id = DagRunType.SIMULATION.generate_run_id(suffix=simulation_id)
+    simulation_dag_run = dag.create_dagrun(
+        run_id=simulation_run_id,
+        logical_date=None,
+        data_interval=None,
+        run_after=timezone.utcnow(),
+        conf=None,
+        run_type=DagRunType.SIMULATION,
+        triggered_by=DagRunTriggeredByType.UI,
+        triggering_user_name=None,
+        note="Simulation run",
+        state=DagRunState.SUCCESS,
+        session=session,
+    )
+    simulation_dag_run.is_simulation = True
 
     _simulation_results[simulation_id] = response
     return response

@@ -118,6 +118,30 @@ class TestRunSimulation(TestSimulationEndpoint):
         total = sum(te["estimated_seconds"] for te in data["task_estimates"])
         assert data["total_estimated_seconds"] == total
 
+    def test_should_load_serialized_dag_when_dag_run_dag_is_missing(self, test_client, session):
+        self.create_dag_run_with_tasks(session)
+        session.expunge_all()
+
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["dag_id"] == DAG_ID
+        assert "simulation_id" in data
+
+    def test_simulation_run_is_created_and_listed(self, test_client, session):
+        self.create_dag_run_with_tasks(session)
+
+        post_response = test_client.post(f"/dags/{DAG_ID}/simulate")
+        assert post_response.status_code == 200
+        simulation_id = post_response.json()["simulation_id"]
+
+        dag_runs_response = test_client.get(f"/dags/{DAG_ID}/dagRuns?run_type=simulation")
+        assert dag_runs_response.status_code == 200
+        dag_runs = dag_runs_response.json()["dag_runs"]
+        assert any(run["run_id"].startswith("simulation__") for run in dag_runs)
+        assert any(run["run_type"] == "simulation" for run in dag_runs)
+
 
 class TestGetSimulation(TestSimulationEndpoint):
     def test_should_respond_200(self, test_client, session):

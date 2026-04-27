@@ -8,60 +8,34 @@ import {
   Badge,
   Grid,
   GridItem,
-  Button,
   Icon,
 } from "@chakra-ui/react";
-import {
-  FiClock,
-  FiCpu,
-  FiCheckCircle,
-  FiXCircle,
-  FiSkipForward,
-  FiAlertCircle,
-  FiSettings,
-  FiBarChart2,
-  FiGitBranch,
-} from "react-icons/fi";
+import { FiClock } from "react-icons/fi";
 
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useDagServiceGetDagDetails } from "openapi/queries";
 
-// --- Types ---
-interface ValidationError {
-  type: string;
-  message: string;
-  tasks?: string[];
-}
-
-interface ResourceLimitWarning {
-  resource: string;
-  estimated: number;
-  limit: number;
-  unit: string;
-}
-
-interface SLAMiss {
+interface TaskEstimate {
   task_id: string;
-  expected_duration: number;
-  sla_threshold: number;
-  severity: "warning" | "critical";
+  operator_type: string;
+  estimated_seconds: number;
+  confidence: number;
+}
+
+interface CriticalPathResult {
+  critical_path: string[];
+  critical_edges: [string, string][];
+  longest_task: string;
 }
 
 interface SimulationReport {
+  simulation_id: string;
   dag_id: string;
+  task_estimates: TaskEstimate[];
+  total_estimated_seconds: number;
+  critical_path: CriticalPathResult;
   predicted_outcome: string;
-  total_duration_seconds: number;
-  total_resource_consumption_cpu: number;
-  total_wait_time_seconds: number;
-  success_tasks: string[];
-  failed_tasks: string[];
-  skipped_tasks: string[];
-  validation_errors: ValidationError[];
-  dag_structure_issues: string[];
-  config_errors: string[];
-  resource_limit_warnings: ResourceLimitWarning[];
-  sla_misses: SLAMiss[];
 }
 
 const getLatestSimulationId = (dagId: string): string | null => {
@@ -83,45 +57,14 @@ const getLatestSimulationId = (dagId: string): string | null => {
   }
 };
 
-// --- Placeholder fetch for a specific simulation ---
 const fetchSimulationReport = async (dagId: string, simulationId: string): Promise<SimulationReport> => {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  // Return mock data (same as before)
-  return {
-    dag_id: dagId,
-    predicted_outcome: "success",
-    total_duration_seconds: 125,
-    total_resource_consumption_cpu: 3.5,
-    total_wait_time_seconds: 42,
-    success_tasks: ["task_a", "task_b", "task_c", "task_d", "task_e", "task_f", "task_g", "task_h"],
-    failed_tasks: ["task_i"],
-    skipped_tasks: ["task_j", "task_k"],
-    validation_errors: [
-      {
-        type: "Missing Dependency",
-        message: "Task 'send_email' depends on non-existent task 'generate_report'.",
-        tasks: ["send_email"],
-      },
-    ],
-    dag_structure_issues: ["Orphaned task: 'cleanup' has no dependencies."],
-    config_errors: ["Connection 'postgres_default' not found."],
-    resource_limit_warnings: [
-      {
-        resource: "CPU",
-        estimated: 3.5,
-        limit: 2.0,
-        unit: "cores",
-      },
-    ],
-    sla_misses: [
-      {
-        task_id: "data_processing",
-        expected_duration: 180,
-        sla_threshold: 120,
-        severity: "critical",
-      },
-    ],
-  };
+  const response = await fetch(
+    `/api/v2/dags/${encodeURIComponent(dagId)}/simulate/${encodeURIComponent(simulationId)}`,
+  );
+  if (!response.ok) {
+    throw new Error("Failed to fetch simulation report");
+  }
+  return response.json();
 };
 
 // --- Component ---
@@ -136,11 +79,6 @@ export const Simulation = () => {
   const [error, setError] = useState<string | null>(null);
   const [hasPreviousSimulation, setHasPreviousSimulation] = useState<boolean | null>(null);
 
-  // Expand/collapse states for each status
-  const [showAllSuccess, setShowAllSuccess] = useState(false);
-  const [showAllFailed, setShowAllFailed] = useState(false);
-  const [showAllSkipped, setShowAllSkipped] = useState(false);
-
   useEffect(() => {
     if (!dagId) return;
 
@@ -152,13 +90,10 @@ export const Simulation = () => {
         let data: SimulationReport | null = null;
 
         if (simulationId) {
-          // Fetch a specific simulation by ID
           data = await fetchSimulationReport(dagId, simulationId);
           setHasPreviousSimulation(true);
         } else {
-          // Fetch the latest known simulation for this DAG, if any.
           const latestSimulationId = getLatestSimulationId(dagId);
-
           if (latestSimulationId) {
             data = await fetchSimulationReport(dagId, latestSimulationId);
             setHasPreviousSimulation(true);
@@ -171,10 +106,15 @@ export const Simulation = () => {
         if (!cancelled) {
           setReport(data);
         }
-      } catch (err) {
-        if (!cancelled) setError("Failed to load simulation report.");
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load simulation report.");
+          setReport(null);
+        }
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -186,60 +126,6 @@ export const Simulation = () => {
 
   if (!dag) return null;
 
-  const renderTaskTable = (
-    title: string,
-    tasks: string[],
-    color: string,
-    state: boolean,
-    setState: React.Dispatch<React.SetStateAction<boolean>>,
-    icon?: React.ElementType
-  ) => {
-    const taskCount = tasks.length;
-    const visibleTasks = state ? tasks : tasks.slice(0, 3);
-    const hasMore = taskCount > 3;
-
-    return (
-      <Box>
-        <HStack mb={2}>
-          {icon && <Icon as={icon} color={color} />}
-          <Text fontWeight="bold" color={color}>
-            {title}
-          </Text>
-          <Badge
-            colorScheme={color === "green.500" ? "green" : color === "red.500" ? "red" : "gray"}
-            ml={2}
-          >
-            {taskCount}
-          </Badge>
-        </HStack>
-        {taskCount === 0 ? (
-          <Text color="fg.muted" fontSize="sm">
-            None
-          </Text>
-        ) : (
-          <>
-            <Table.Root striped size="sm">
-              <Table.Body>
-                {visibleTasks.map((task, idx) => (
-                  <Table.Row key={idx}>
-                    <Table.Cell>{task}</Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table.Root>
-            {hasMore && (
-              <Button variant="ghost" size="xs" mt={1} onClick={() => setState(!state)}>
-                {state ? "Show less" : `Show all ${taskCount}`}
-              </Button>
-            )}
-          </>
-        )}
-      </Box>
-    );
-  };
-
-  // If no simulation has ever been run and we are not currently loading,
-  // show a placeholder message.
   const showNoSimulationPlaceholder =
     !isLoading && !error && hasPreviousSimulation === false && !report;
 
@@ -266,7 +152,6 @@ export const Simulation = () => {
 
         {report && !isLoading && (
           <>
-            {/* Summary */}
             <Heading size="md" mb={0}>
               Summary
             </Heading>
@@ -287,229 +172,77 @@ export const Simulation = () => {
               </GridItem>
               <GridItem>
                 <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                  Total Duration
+                  Total Estimated Runtime
                 </Text>
                 <HStack mt={1}>
                   <Icon as={FiClock} color="fg.muted" />
                   <Text fontSize="lg" fontWeight="bold">
-                    {report.total_duration_seconds} seconds
+                    {report.total_estimated_seconds} seconds
                   </Text>
                 </HStack>
               </GridItem>
               <GridItem>
                 <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                  Total Resource Consumption (CPU)
+                  Task Count
                 </Text>
-                <HStack mt={1}>
-                  <Icon as={FiCpu} color="blue.500" />
-                  <Text fontSize="lg" fontWeight="bold">
-                    {report.total_resource_consumption_cpu} cores
-                  </Text>
-                </HStack>
+                <Text fontSize="lg" fontWeight="bold" mt={1}>
+                  {report.task_estimates.length}
+                </Text>
               </GridItem>
               <GridItem>
                 <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                  Total Wait Time
+                  Longest Critical Task
                 </Text>
-                <HStack mt={1}>
-                  <Icon as={FiClock} color="fg.muted" />
-                  <Text fontSize="lg" fontWeight="bold">
-                    {report.total_wait_time_seconds} seconds
-                  </Text>
-                </HStack>
+                <Text fontSize="lg" fontWeight="bold" mt={1}>
+                  {report.critical_path.longest_task}
+                </Text>
               </GridItem>
             </Grid>
 
             <Box borderTopWidth={1} borderColor="border.emphasized" my={1} />
 
-            {/* Task Status Details */}
             <Box>
-              <Heading size="sm" mb={2}>
-                Task Status Details
+              <Heading size="md" mb={3}>
+                Task Estimates
               </Heading>
-              <Grid templateColumns="repeat(3, 1fr)" gap={3}>
-                <GridItem>
-                  {renderTaskTable(
-                    "Success Tasks",
-                    report.success_tasks,
-                    "green.500",
-                    showAllSuccess,
-                    setShowAllSuccess,
-                    FiCheckCircle
-                  )}
-                </GridItem>
-                <GridItem>
-                  {renderTaskTable(
-                    "Failed Tasks",
-                    report.failed_tasks,
-                    "red.500",
-                    showAllFailed,
-                    setShowAllFailed,
-                    FiXCircle
-                  )}
-                </GridItem>
-                <GridItem>
-                  {renderTaskTable(
-                    "Skipped Tasks",
-                    report.skipped_tasks,
-                    "gray.500",
-                    showAllSkipped,
-                    setShowAllSkipped,
-                    FiSkipForward
-                  )}
-                </GridItem>
-              </Grid>
+              <Table.Root striped size="sm">
+                <Table.Header>
+                  <Table.Row>
+                    <Table.ColumnHeader>Task</Table.ColumnHeader>
+                    <Table.ColumnHeader>Operator</Table.ColumnHeader>
+                    <Table.ColumnHeader>Estimated Seconds</Table.ColumnHeader>
+                    <Table.ColumnHeader>Confidence</Table.ColumnHeader>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {report.task_estimates.map((taskEstimate) => (
+                    <Table.Row key={taskEstimate.task_id}>
+                      <Table.Cell>{taskEstimate.task_id}</Table.Cell>
+                      <Table.Cell>{taskEstimate.operator_type}</Table.Cell>
+                      <Table.Cell>{taskEstimate.estimated_seconds}</Table.Cell>
+                      <Table.Cell>{(taskEstimate.confidence * 100).toFixed(0)}%</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table.Root>
             </Box>
 
             <Box borderTopWidth={1} borderColor="border.emphasized" my={1} />
 
-            {/* DAG Structure Issues */}
-            {report.dag_structure_issues.length > 0 && (
-              <Box>
-                <Heading size="md" mb={3}>
-                  <HStack>
-                    <Icon as={FiGitBranch} color="orange.500" />
-                    <Text>DAG Structure Issues</Text>
-                    <Badge colorScheme="orange" ml={2}>
-                      {report.dag_structure_issues.length}
-                    </Badge>
-                  </HStack>
-                </Heading>
-                <Table.Root striped>
-                  <Table.Body>
-                    {report.dag_structure_issues.map((issue, idx) => (
-                      <Table.Row key={idx}>
-                        <Table.Cell>{issue}</Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table.Root>
-              </Box>
-            )}
-
-            {/* Validation Errors */}
-            {report.validation_errors.length > 0 && (
-              <Box>
-                <Heading size="md" mb={3}>
-                  <HStack>
-                    <Icon as={FiAlertCircle} color="red.500" />
-                    <Text>Validation Errors</Text>
-                    <Badge colorScheme="red" ml={2}>
-                      {report.validation_errors.length}
-                    </Badge>
-                  </HStack>
-                </Heading>
-                <Table.Root striped>
-                  <Table.Body>
-                    {report.validation_errors.map((err, idx) => (
-                      <Table.Row key={idx}>
-                        <Table.Cell>
-                          <Text fontWeight="bold">{err.type}</Text>
-                          <Text>{err.message}</Text>
-                          {err.tasks && (
-                            <Text fontSize="sm" color="fg.muted">
-                              Tasks: {err.tasks.join(", ")}
-                            </Text>
-                          )}
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table.Root>
-              </Box>
-            )}
-
-            {/* Configuration Errors */}
-            {report.config_errors.length > 0 && (
-              <Box>
-                <Heading size="md" mb={3}>
-                  <HStack>
-                    <Icon as={FiSettings} color="red.500" />
-                    <Text>Configuration Errors</Text>
-                    <Badge colorScheme="red" ml={2}>
-                      {report.config_errors.length}
-                    </Badge>
-                  </HStack>
-                </Heading>
-                <Table.Root striped>
-                  <Table.Body>
-                    {report.config_errors.map((err, idx) => (
-                      <Table.Row key={idx}>
-                        <Table.Cell>{err}</Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table.Root>
-              </Box>
-            )}
-
-            {/* Resource Limit Warnings */}
-            {report.resource_limit_warnings.length > 0 && (
-              <Box>
-                <Heading size="md" mb={3}>
-                  <HStack>
-                    <Icon as={FiBarChart2} color="orange.500" />
-                    <Text>Resource Limit Warnings</Text>
-                    <Badge colorScheme="orange" ml={2}>
-                      {report.resource_limit_warnings.length}
-                    </Badge>
-                  </HStack>
-                </Heading>
-                <Table.Root striped>
-                  <Table.Body>
-                    {report.resource_limit_warnings.map((warn, idx) => (
-                      <Table.Row key={idx}>
-                        <Table.Cell>
-                          <Text fontWeight="bold" color="orange.500">
-                            {warn.resource}
-                          </Text>
-                          <Text>
-                            Estimated: {warn.estimated} {warn.unit}
-                          </Text>
-                          <Text>
-                            Limit: {warn.limit} {warn.unit}
-                          </Text>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table.Root>
-              </Box>
-            )}
-
-            {/* SLA Misses */}
-            {report.sla_misses.length > 0 && (
-              <Box>
-                <Heading size="md" mb={3}>
-                  <HStack>
-                    <Icon as={FiClock} color="red.500" />
-                    <Text>SLA Misses</Text>
-                    <Badge colorScheme="red" ml={2}>
-                      {report.sla_misses.length}
-                    </Badge>
-                  </HStack>
-                </Heading>
-                <Table.Root striped>
-                  <Table.Body>
-                    {report.sla_misses.map((sla, idx) => (
-                      <Table.Row key={idx}>
-                        <Table.Cell>
-                          <Text fontWeight="bold">{sla.task_id}</Text>
-                          <Text>Expected duration: {sla.expected_duration}s</Text>
-                          <Text>SLA threshold: {sla.sla_threshold}s</Text>
-                          <Badge
-                            colorScheme={sla.severity === "critical" ? "red" : "orange"}
-                            mt={1}
-                          >
-                            {sla.severity}
-                          </Badge>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table.Root>
-              </Box>
-            )}
+            <Box>
+              <Heading size="md" mb={3}>
+                Critical Path
+              </Heading>
+              <Text color="fg.muted" mb={2}>
+                Longest task: <strong>{report.critical_path.longest_task}</strong>
+              </Text>
+              <Text color="fg.muted" mb={2}>
+                Path: {report.critical_path.critical_path.join(" → ")}
+              </Text>
+              <Text color="fg.muted">
+                Critical edges: {report.critical_path.critical_edges.length}
+              </Text>
+            </Box>
           </>
         )}
       </VStack>

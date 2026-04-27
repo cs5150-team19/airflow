@@ -78,5 +78,6 @@ export const dagRunTypeOptions = createListCollection({
     { label: "common:runTypes.manual", value: "manual" },
     { label: "common:runTypes.scheduled", value: "scheduled" },
     { label: "common:runTypes.asset_triggered", value: "asset_triggered" },
+    { label: "common:runTypes.simulation", value: "simulation" },
   ],
 });

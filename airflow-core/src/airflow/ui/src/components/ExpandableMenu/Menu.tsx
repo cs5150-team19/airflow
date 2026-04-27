@@ -12,7 +12,7 @@ export const SimulationMenu = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const options = getSimulationDisplayOptions(searchParams);
 
-  const toggle = (key: "sim_cp" | "sim_duration" | "sim_resource" | "sim_wait") => {
+  const toggle = (key: "sim_cp" | "sim_duration") => {
     const nextSearchParams = new URLSearchParams(searchParams);
     const isEnabled = nextSearchParams.get(key) === "1";
 
@@ -64,41 +64,12 @@ export const SimulationMenu = () => {
                 <ChakraCheckbox.HiddenInput />
                 <ChakraCheckbox.Control />
                 <VStack align="start" gap={0}>
-                  <ChakraCheckbox.Label>Bottlenecks - Duration</ChakraCheckbox.Label>
+                  <ChakraCheckbox.Label>Bottlenecks - Run Time</ChakraCheckbox.Label>
                   <Text fontSize="xs" color="gray.600" fontWeight="normal">
-                    Display Tasks with the Highest Expected Durations
+                    Display Tasks with the Highest Expected Run Time
                   </Text>
                 </VStack>
               </ChakraCheckbox.Root>
-
-              <ChakraCheckbox.Root
-                checked={options.showResourceBottleneck}
-                onCheckedChange={() => toggle("sim_resource")}
-              >
-                <ChakraCheckbox.HiddenInput />
-                <ChakraCheckbox.Control />
-                <VStack align="start" gap={0}>
-                    <ChakraCheckbox.Label>Bottlenecks - Resource</ChakraCheckbox.Label>
-                    <Text fontSize="xs" color="gray.600" fontWeight="normal">
-                        Dislay Tasks with the Highest Expected Resource Usage
-                    </Text>
-                </VStack>
-              </ChakraCheckbox.Root>
-
-              <ChakraCheckbox.Root
-                checked={options.showWaitTimeBottleneck}
-                onCheckedChange={() => toggle("sim_wait")}
-              >
-                <ChakraCheckbox.HiddenInput />
-                <ChakraCheckbox.Control />
-                <VStack align="start" gap={0}>
-                    <ChakraCheckbox.Label>Bottlenecks - Wait Time</ChakraCheckbox.Label>
-                    <Text fontSize="xs" color="gray.600" fontWeight="normal">
-                        Dislay Tasks with the Highest Expected Wait Time
-                    </Text>
-                </VStack>
-              </ChakraCheckbox.Root>
-
             </VStack>
           </Box>
         )}

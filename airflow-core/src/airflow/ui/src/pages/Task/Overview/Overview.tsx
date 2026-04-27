@@ -21,7 +21,6 @@ import {
   HStack,
   Skeleton,
   SimpleGrid,
-  Badge,
   Text,
   VStack,
   Heading,
@@ -33,7 +32,7 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useLocation, useSearchParams } from "react-router-dom";
-import { FiClock, FiCpu, FiDatabase, FiAlertCircle } from "react-icons/fi";
+import { FiAlertCircle } from "react-icons/fi";
 
 import { useTaskInstanceServiceGetTaskInstances } from "openapi/queries";
 import { DurationChart } from "src/components/DurationChart";
@@ -45,24 +44,11 @@ import { isStatePending, useAutoRefresh } from "src/utils";
 
 const defaultHour = "24";
 
-// --- Mock data for simulation mode (single task) ---
-interface SimulationTaskInstance {
+interface SimulationTaskEstimate {
   task_id: string;
-  status: "success" | "failed" | "skipped" | "upstream_failed";
-  duration_seconds: number;
-  start_time: string;
-  end_time: string;
-  estimated_resource_usage: {
-    time_complexity: string;
-    space_complexity: string;
-  };
-  input_output: {
-    input_source: string;
-    input_type: string;
-    output_source: string;
-    output_type: string;
-  };
-  error?: string;
+  operator_type: string;
+  estimated_seconds: number;
+  confidence: number;
 }
 
 type LatestSimulationRecord = {
@@ -87,65 +73,30 @@ const getLatestSimulationRecord = (dagId: string): LatestSimulationRecord | null
   }
 };
 
-const hashString = (value: string): number =>
-  value.split("").reduce((accumulator, char) => accumulator + char.charCodeAt(0), 0);
+interface SimulationReport {
+  task_estimates: SimulationTaskEstimate[];
+}
 
-const deriveSimulationResult = (taskId: string, seed: string): SimulationTaskInstance => {
-  const hash = hashString(`${taskId}:${seed}`);
-  const base = dayjs().subtract(hash % 20, "minute");
-  const duration = (hash % 40) + 5;
-  const states: Array<SimulationTaskInstance["status"]> = ["success", "failed", "skipped", "upstream_failed"];
-  const status = states[hash % states.length] ?? "success";
-
-  return {
-    task_id: taskId,
-    status,
-    duration_seconds: duration,
-    end_time: base.add(duration, "second").toISOString(),
-    error: status === "failed" ? "Simulation predicts this task may fail due to input constraints." : undefined,
-    estimated_resource_usage: {
-      space_complexity: hash % 2 === 0 ? "O(1)" : "O(n)",
-      time_complexity: hash % 3 === 0 ? "O(n)" : "O(1)",
-    },
-    input_output: {
-      input_source: "upstream task output",
-      input_type: "json",
-      output_source: status === "failed" ? "none" : "task output",
-      output_type: status === "failed" ? "" : "json",
-    },
-    start_time: base.toISOString(),
-  };
-};
-
-// Placeholder API call – replace with real endpoint later
-const fetchSimulationTaskInstance = async (
+const fetchSimulationTaskEstimate = async (
   dagId: string,
   taskId: string,
   simulationId?: string | null,
-): Promise<SimulationTaskInstance | null> => {
-  await new Promise(resolve => setTimeout(resolve, 500));
+): Promise<SimulationTaskEstimate | null> => {
   const latestSimulation = simulationId ?? getLatestSimulationRecord(dagId)?.simulationId;
 
   if (!latestSimulation) {
     return null;
   }
 
-  return deriveSimulationResult(taskId, latestSimulation);
-};
+  const response = await fetch(
+    `/api/v2/dags/${encodeURIComponent(dagId)}/simulate/${encodeURIComponent(latestSimulation)}`,
+  );
+  if (!response.ok) {
+    return null;
+  }
 
-// Helper functions
-const formatDuration = (seconds: number): string => {
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = seconds % 60;
-  if (hrs > 0) return `${hrs} hr ${mins} min ${secs} sec`;
-  if (mins > 0) return `${mins} min ${secs} sec`;
-  return `${secs} sec`;
-};
-
-const formatTime = (isoString: string): string => {
-  if (!isoString) return "—";
-  return dayjs(isoString).format("hh:mm:ss A");
+  const data = (await response.json()) as SimulationReport;
+  return data.task_estimates.find((estimate) => estimate.task_id === taskId) ?? null;
 };
 
 export const Overview = () => {
@@ -174,8 +125,6 @@ export const Overview = () => {
       taskId: Boolean(groupId) ? undefined : taskId,
     });
 
-  const failedTaskCount = failedTaskInstancesData?.total_entries ?? 0;
-
   const { data: tiData, isLoading: isLoadingTaskInstances } = useTaskInstanceServiceGetTaskInstances(
     {
       dagId,
@@ -193,7 +142,7 @@ export const Overview = () => {
   );
 
   // Simulation mode state
-  const [simulationTask, setSimulationTask] = useState<SimulationTaskInstance | null>(null);
+  const [simulationTask, setSimulationTask] = useState<SimulationTaskEstimate | null>(null);
   const [isLoadingSimulation, setIsLoadingSimulation] = useState(false);
   const taskIdentifier = taskId || groupId;
   const simulationIdFromQuery = searchParams.get("simulation_id");
@@ -218,7 +167,7 @@ export const Overview = () => {
   useEffect(() => {
     if (isSimulating && dagId && taskIdentifier) {
       setIsLoadingSimulation(true);
-      fetchSimulationTaskInstance(dagId, taskIdentifier, simulationIdFromQuery)
+      fetchSimulationTaskEstimate(dagId, taskIdentifier, simulationIdFromQuery)
         .then(data => setSimulationTask(data))
         .finally(() => setIsLoadingSimulation(false));
     } else if (isSimulating && !taskIdentifier) {
@@ -249,9 +198,8 @@ export const Overview = () => {
 
           {simulationTask && !isLoadingSimulation && (
             <>
-              {/* Summary */}
               <Heading size="md" mb={0}>
-                Summary
+                Simulation Estimate
               </Heading>
               <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={5}>
                 <GridItem>
@@ -264,137 +212,29 @@ export const Overview = () => {
                 </GridItem>
                 <GridItem>
                   <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                    Status
-                  </Text>
-                  <Badge
-                    colorScheme={
-                      simulationTask.status === "success"
-                        ? "green"
-                        : simulationTask.status === "failed"
-                          ? "red"
-                          : simulationTask.status === "skipped"
-                            ? "gray"
-                            : "orange"
-                    }
-                    fontSize="md"
-                    px={2}
-                    py={1}
-                    mt={1}
-                  >
-                    {simulationTask.status.toUpperCase().replace("_", " ")}
-                  </Badge>
-                </GridItem>
-                <GridItem>
-                  <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                    Duration
-                  </Text>
-                  <HStack mt={1}>
-                    <Icon as={FiClock} color="fg.muted" />
-                    <Text fontSize="lg" fontWeight="bold">
-                      {formatDuration(simulationTask.duration_seconds)}
-                    </Text>
-                  </HStack>
-                </GridItem>
-                <GridItem>
-                  <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                    Start Time
+                    Operator Type
                   </Text>
                   <Text fontSize="lg" fontWeight="bold">
-                    {formatTime(simulationTask.start_time)}
+                    {simulationTask.operator_type}
                   </Text>
                 </GridItem>
                 <GridItem>
                   <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                    End Time
+                    Estimated Duration
                   </Text>
                   <Text fontSize="lg" fontWeight="bold">
-                    {formatTime(simulationTask.end_time)}
+                    {simulationTask.estimated_seconds} seconds
+                  </Text>
+                </GridItem>
+                <GridItem>
+                  <Text fontSize="sm" fontWeight="medium" color="fg.muted">
+                    Confidence
+                  </Text>
+                  <Text fontSize="lg" fontWeight="bold">
+                    {(simulationTask.confidence * 100).toFixed(0)}%
                   </Text>
                 </GridItem>
               </Grid>
-
-              <Box borderTopWidth={1} borderColor="border.emphasized" my={1} />
-
-              {/* Estimated Resource Usage */}
-              <Box>
-                <Heading size="md" mb={3}>
-                  <HStack>
-                    <Icon as={FiCpu} color="blue.500" />
-                    <Text>Estimated Resource Usage</Text>
-                  </HStack>
-                </Heading>
-                <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={5}>
-                  <GridItem>
-                    <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                      Time Complexity
-                    </Text>
-                    <Text fontSize="lg" fontWeight="bold">
-                      {simulationTask.estimated_resource_usage.time_complexity}
-                    </Text>
-                  </GridItem>
-                  <GridItem>
-                    <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                      Space Complexity
-                    </Text>
-                    <Text fontSize="lg" fontWeight="bold">
-                      {simulationTask.estimated_resource_usage.space_complexity}
-                    </Text>
-                  </GridItem>
-                </Grid>
-              </Box>
-
-              <Box borderTopWidth={1} borderColor="border.emphasized" my={1} />
-
-              {/* Input/Output */}
-              <Box>
-                <Heading size="md" mb={3}>
-                  <HStack>
-                    <Icon as={FiDatabase} color="green.500" />
-                    <Text>Input / Output</Text>
-                  </HStack>
-                </Heading>
-                <Grid templateColumns={{ base: "1fr", md: "repeat(2, 1fr)" }} gap={5}>
-                  <GridItem>
-                    <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                      Input Source
-                    </Text>
-                    <Text fontWeight="bold">{simulationTask.input_output.input_source}</Text>
-                    {simulationTask.input_output.input_type && (
-                      <Text fontSize="sm" color="fg.muted">
-                        Type: {simulationTask.input_output.input_type}
-                      </Text>
-                    )}
-                  </GridItem>
-                  <GridItem>
-                    <Text fontSize="sm" fontWeight="medium" color="fg.muted">
-                      Output Source
-                    </Text>
-                    <Text fontWeight="bold">{simulationTask.input_output.output_source}</Text>
-                    {simulationTask.input_output.output_type && (
-                      <Text fontSize="sm" color="fg.muted">
-                        Type: {simulationTask.input_output.output_type}
-                      </Text>
-                    )}
-                  </GridItem>
-                </Grid>
-              </Box>
-
-              {/* Errors (if any) */}
-              {simulationTask.status === "failed" && simulationTask.error && (
-                <Box>
-                  <Heading size="md" mb={3}>
-                    <HStack>
-                      <Icon as={FiAlertCircle} color="red.500" />
-                      <Text>Error</Text>
-                    </HStack>
-                  </Heading>
-                  <Box p={0} borderRadius="sm">
-                    <Text fontWeight="bold">
-                      {simulationTask.error}
-                    </Text>
-                  </Box>
-                </Box>
-              )}
             </>
           )}
         </VStack>
@@ -417,15 +257,15 @@ export const Overview = () => {
       </Box>
       <HStack flexWrap="wrap">
         <TrendCountButton
-          colorPalette={failedTaskCount === 0 ? "green" : "red"}
-          count={failedTaskCount}
+          colorPalette={(failedTaskInstances?.total_entries ?? 0) === 0 ? "green" : "red"}
+          count={failedTaskInstances?.total_entries ?? 0}
           endDate={endDate}
-          events={(failedTaskInstancesData?.task_instances ?? []).map((ti) => ({
+          events={(failedTaskInstances?.task_instances ?? []).map((ti) => ({
             timestamp: ti.start_date ?? ti.logical_date,
           }))}
           isLoading={isFailedTaskInstancesLoading}
           label={translate("overview.buttons.failedTaskInstance", {
-            count: failedTaskCount,
+            count: failedTaskInstances?.total_entries ?? 0,
           })}
           route={{
             pathname: "task_instances",
