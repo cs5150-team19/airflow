@@ -22,6 +22,7 @@ that path, and the task with the longest duration on the path.
 """
 from __future__ import annotations
 
+from collections import defaultdict, deque
 from typing import TYPE_CHECKING, Any
 
 from airflow.api_fastapi.core_api.datamodels.simulation import CriticalPathResult
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 
 
 def get_critical_path(
-    dag: DAG,
+    dag: Any,
     task_responses: list[TaskSimulationResponse],
 ) -> CriticalPathResult:
     # --- Build lookup: task_id -> estimated_seconds ---
@@ -88,15 +89,16 @@ def get_critical_path(
     # --- Longest task by estimated_seconds ---
     longest_task: str = max(task_responses, key=lambda t: t.estimated_seconds).task_id
 
-    # --- Parallel edges ---
-    all_edges = [(u, ds) for u in all_task_ids for ds in downstream[u]]
-    parallel_edges = [
-        (u, ds) for u, ds in all_edges
-        if u not in on_critical_path or ds not in on_critical_path
+    # --- Critical edges (both endpoints lie on the critical path) ---
+    critical_edges = [
+        (u, ds)
+        for u in all_task_ids
+        for ds in downstream[u]
+        if u in on_critical_path and ds in on_critical_path
     ]
 
     return CriticalPathResult(
         critical_path=critical_path,
-        parallel_edges=parallel_edges,
+        critical_edges=critical_edges,
         longest_task=longest_task,
     )
