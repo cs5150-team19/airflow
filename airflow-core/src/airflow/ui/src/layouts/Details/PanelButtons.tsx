@@ -1,5 +1,3 @@
-/* eslint-disable max-lines */
-
 /*!
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -44,6 +42,7 @@ import { useLocalStorage } from "usehooks-ts";
 import type { DagRunState, DagRunType } from "openapi/requests/types.gen";
 import { DagVersionSelect } from "src/components/DagVersionSelect";
 import { directionOptions, type Direction } from "src/components/Graph/useGraphLayout";
+import { GraphTaskFilters } from "src/components/GraphTaskFilters";
 import { RunTypeIcon } from "src/components/RunTypeIcon";
 import { SearchBar } from "src/components/SearchBar";
 import { StateBadge } from "src/components/StateBadge";
@@ -56,6 +55,7 @@ import { dagRunTypeOptions, dagRunStateOptions } from "src/constants/stateOption
 import { useContainerWidth } from "src/utils/useContainerWidth";
 
 import { DagRunSelect } from "./DagRunSelect";
+import { GridFilters } from "./GridFilters";
 import { RunTypeLegend } from "./Grid/RunTypeLegend";
 import { TaskStreamFilter } from "./TaskStreamFilter";
 import { ToggleGroups } from "./ToggleGroups";
@@ -257,6 +257,7 @@ export const PanelButtons = ({
         <Flex alignItems="center" gap={1} justifyContent="space-between">
           <ToggleGroups />
           <TaskStreamFilter />
+          {dagView === "graph" && <GraphTaskFilters />}
           {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
           <Popover.Root autoFocus={false} positioning={{ placement: "bottom-end" }}>
             <Popover.Trigger asChild>
@@ -493,20 +494,31 @@ export const PanelButtons = ({
         </Flex>
       </Flex>
 
-      {dagView === "grid" && (
-        <Flex color="fg.muted" gap={2} justifyContent="flex-end" mt={1}>
-          <RunTypeLegend />
-          <Tooltip
-            content={
-              <Box>
-                <Text>{translate("dag:navigation.navigation", { arrow: "↑↓←→" })}</Text>
-                <Text>{translate("dag:navigation.toggleGroup")}</Text>
-              </Box>
-            }
-            portalled
-          >
-            <LuKeyboard />
-          </Tooltip>
+      {dagView === "graph" ? (
+        <Flex justifyContent="flex-end" mt={1}>
+          <Flex color="fg.muted" gap={2}>
+            <Tooltip content={<Text>{translate("dag:navigation.openGraphFilters")}</Text>} portalled>
+              <LuKeyboard />
+            </Tooltip>
+          </Flex>
+        </Flex>
+      ) : (
+        <Flex justifyContent="space-between" mt={1}>
+          <GridFilters />
+          <Flex color="fg.muted" gap={2} justifyContent="flex-end" mt={1}>
+            <RunTypeLegend />
+            <Tooltip
+              content={
+                <Box>
+                  <Text>{translate("dag:navigation.navigation", { arrow: "↑↓←→" })}</Text>
+                  <Text>{translate("dag:navigation.toggleGroup")}</Text>
+                </Box>
+              }
+              portalled
+            >
+              <LuKeyboard />
+            </Tooltip>
+          </Flex>
         </Flex>
       )}
     </Box>

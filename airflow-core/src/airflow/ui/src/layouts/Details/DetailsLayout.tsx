@@ -1,5 +1,3 @@
-/* eslint-disable max-lines */
-
 /*!
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -55,8 +53,8 @@ import {
   triggeringUserFilterKey,
 } from "src/constants/localStorage";
 import { VersionIndicatorOptions } from "src/constants/showVersionIndicatorOptions";
+import { GroupsProvider } from "src/context/groups";
 import { HoverProvider } from "src/context/hover";
-import { OpenGroupsProvider } from "src/context/openGroups";
 
 import { DagBreadcrumb } from "./DagBreadcrumb";
 import { Gantt } from "./Gantt/Gantt";
@@ -119,7 +117,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
 
   return (
     <HoverProvider>
-      <OpenGroupsProvider dagId={dagId}>
+      <GroupsProvider dagId={dagId}>
         <HStack justifyContent="space-between" mb={2}>
           <DagBreadcrumb />
           <Flex gap={1}>
@@ -327,7 +325,7 @@ export const DetailsLayout = ({ children, error, isLoading, tabs }: Props) => {
             )}
           </PanelGroup>
         </Box>
-      </OpenGroupsProvider>
+      </GroupsProvider>
     </HoverProvider>
   );
 };
