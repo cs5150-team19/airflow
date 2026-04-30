@@ -58,9 +58,12 @@ class TestGetHistoricalRuntimes:
         """Successful runs are returned with correct fields."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="run1", state=TaskInstanceState.SUCCESS.value,
-            start=start, duration=10.0,
+            dag_maker,
+            session,
+            run_id="run1",
+            state=TaskInstanceState.SUCCESS.value,
+            start=start,
+            duration=10.0,
         )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, session=session)
@@ -82,14 +85,20 @@ class TestGetHistoricalRuntimes:
         """By default, only successful runs are returned."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="success_run", state=TaskInstanceState.SUCCESS.value,
-            start=start, duration=5.0,
+            dag_maker,
+            session,
+            run_id="success_run",
+            state=TaskInstanceState.SUCCESS.value,
+            start=start,
+            duration=5.0,
         )
         _create_ti(
-            dag_maker, session,
-            run_id="failed_run", state=TaskInstanceState.FAILED.value,
-            start=start + timedelta(hours=1), duration=3.0,
+            dag_maker,
+            session,
+            run_id="failed_run",
+            state=TaskInstanceState.FAILED.value,
+            start=start + timedelta(hours=1),
+            duration=3.0,
         )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, session=session)
@@ -101,18 +110,25 @@ class TestGetHistoricalRuntimes:
         """Explicit state filter returns matching runs."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="success_run", state=TaskInstanceState.SUCCESS.value,
-            start=start, duration=5.0,
+            dag_maker,
+            session,
+            run_id="success_run",
+            state=TaskInstanceState.SUCCESS.value,
+            start=start,
+            duration=5.0,
         )
         _create_ti(
-            dag_maker, session,
-            run_id="failed_run", state=TaskInstanceState.FAILED.value,
-            start=start + timedelta(hours=1), duration=3.0,
+            dag_maker,
+            session,
+            run_id="failed_run",
+            state=TaskInstanceState.FAILED.value,
+            start=start + timedelta(hours=1),
+            duration=3.0,
         )
 
         results = get_historical_runtimes(
-            DAG_ID, TASK_ID,
+            DAG_ID,
+            TASK_ID,
             states=[TaskInstanceState.FAILED.value],
             session=session,
         )
@@ -124,18 +140,25 @@ class TestGetHistoricalRuntimes:
         """Multiple states in filter returns all matching runs."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="success_run", state=TaskInstanceState.SUCCESS.value,
-            start=start, duration=5.0,
+            dag_maker,
+            session,
+            run_id="success_run",
+            state=TaskInstanceState.SUCCESS.value,
+            start=start,
+            duration=5.0,
         )
         _create_ti(
-            dag_maker, session,
-            run_id="failed_run", state=TaskInstanceState.FAILED.value,
-            start=start + timedelta(hours=1), duration=3.0,
+            dag_maker,
+            session,
+            run_id="failed_run",
+            state=TaskInstanceState.FAILED.value,
+            start=start + timedelta(hours=1),
+            duration=3.0,
         )
 
         results = get_historical_runtimes(
-            DAG_ID, TASK_ID,
+            DAG_ID,
+            TASK_ID,
             states=[TaskInstanceState.SUCCESS.value, TaskInstanceState.FAILED.value],
             session=session,
         )
@@ -146,14 +169,20 @@ class TestGetHistoricalRuntimes:
         """Task with only failed runs returns empty with default state filter."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="failed1", state=TaskInstanceState.FAILED.value,
-            start=start, duration=2.0,
+            dag_maker,
+            session,
+            run_id="failed1",
+            state=TaskInstanceState.FAILED.value,
+            start=start,
+            duration=2.0,
         )
         _create_ti(
-            dag_maker, session,
-            run_id="failed2", state=TaskInstanceState.FAILED.value,
-            start=start + timedelta(hours=1), duration=1.0,
+            dag_maker,
+            session,
+            run_id="failed2",
+            state=TaskInstanceState.FAILED.value,
+            start=start + timedelta(hours=1),
+            duration=1.0,
         )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, session=session)
@@ -164,13 +193,17 @@ class TestGetHistoricalRuntimes:
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         for i in range(5):
             _create_ti(
-                dag_maker, session,
-                run_id=f"run_{i}", state=TaskInstanceState.SUCCESS.value,
-                start=base + timedelta(days=i), duration=10.0,
+                dag_maker,
+                session,
+                run_id=f"run_{i}",
+                state=TaskInstanceState.SUCCESS.value,
+                start=base + timedelta(days=i),
+                duration=10.0,
             )
 
         results = get_historical_runtimes(
-            DAG_ID, TASK_ID,
+            DAG_ID,
+            TASK_ID,
             start_date=base + timedelta(days=1),
             end_date=base + timedelta(days=3),
             session=session,
@@ -184,13 +217,17 @@ class TestGetHistoricalRuntimes:
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         for i in range(3):
             _create_ti(
-                dag_maker, session,
-                run_id=f"run_{i}", state=TaskInstanceState.SUCCESS.value,
-                start=base + timedelta(days=i), duration=10.0,
+                dag_maker,
+                session,
+                run_id=f"run_{i}",
+                state=TaskInstanceState.SUCCESS.value,
+                start=base + timedelta(days=i),
+                duration=10.0,
             )
 
         results = get_historical_runtimes(
-            DAG_ID, TASK_ID,
+            DAG_ID,
+            TASK_ID,
             start_date=base + timedelta(days=1),
             session=session,
         )
@@ -203,9 +240,12 @@ class TestGetHistoricalRuntimes:
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         for i in range(3):
             _create_ti(
-                dag_maker, session,
-                run_id=f"run_{i}", state=TaskInstanceState.SUCCESS.value,
-                start=base + timedelta(days=i), duration=10.0,
+                dag_maker,
+                session,
+                run_id=f"run_{i}",
+                state=TaskInstanceState.SUCCESS.value,
+                start=base + timedelta(days=i),
+                duration=10.0,
             )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, session=session)
@@ -217,9 +257,12 @@ class TestGetHistoricalRuntimes:
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         for i in range(5):
             _create_ti(
-                dag_maker, session,
-                run_id=f"run_{i}", state=TaskInstanceState.SUCCESS.value,
-                start=base + timedelta(days=i), duration=10.0,
+                dag_maker,
+                session,
+                run_id=f"run_{i}",
+                state=TaskInstanceState.SUCCESS.value,
+                start=base + timedelta(days=i),
+                duration=10.0,
             )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, limit=2, session=session)
@@ -234,9 +277,12 @@ class TestGetHistoricalRuntimes:
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         for i in range(5):
             _create_ti(
-                dag_maker, session,
-                run_id=f"run_{i}", state=TaskInstanceState.SUCCESS.value,
-                start=base + timedelta(days=i), duration=10.0,
+                dag_maker,
+                session,
+                run_id=f"run_{i}",
+                state=TaskInstanceState.SUCCESS.value,
+                start=base + timedelta(days=i),
+                duration=10.0,
             )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, limit=2, offset=2, session=session)
@@ -249,9 +295,12 @@ class TestGetHistoricalRuntimes:
         """Limit values above DEFAULT_LIMIT are capped."""
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="run_0", state=TaskInstanceState.SUCCESS.value,
-            start=base, duration=10.0,
+            dag_maker,
+            session,
+            run_id="run_0",
+            state=TaskInstanceState.SUCCESS.value,
+            start=base,
+            duration=10.0,
         )
 
         # Should not raise, just cap at DEFAULT_LIMIT
@@ -263,9 +312,12 @@ class TestGetHistoricalRuntimes:
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         for i in range(3):
             _create_ti(
-                dag_maker, session,
-                run_id=f"run_{i}", state=TaskInstanceState.SUCCESS.value,
-                start=base + timedelta(days=i), duration=10.0,
+                dag_maker,
+                session,
+                run_id=f"run_{i}",
+                state=TaskInstanceState.SUCCESS.value,
+                start=base + timedelta(days=i),
+                duration=10.0,
             )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, limit=-5, session=session)
@@ -276,9 +328,12 @@ class TestGetHistoricalRuntimes:
         base = datetime(2025, 1, 1, tzinfo=timezone.utc)
         for i in range(3):
             _create_ti(
-                dag_maker, session,
-                run_id=f"run_{i}", state=TaskInstanceState.SUCCESS.value,
-                start=base + timedelta(days=i), duration=10.0,
+                dag_maker,
+                session,
+                run_id=f"run_{i}",
+                state=TaskInstanceState.SUCCESS.value,
+                start=base + timedelta(days=i),
+                duration=10.0,
             )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, offset=-10, session=session)
@@ -288,16 +343,22 @@ class TestGetHistoricalRuntimes:
         """Only returns task instances for the specified dag_id."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            dag_id="dag_a", run_id="run_a",
+            dag_maker,
+            session,
+            dag_id="dag_a",
+            run_id="run_a",
             state=TaskInstanceState.SUCCESS.value,
-            start=start, duration=10.0,
+            start=start,
+            duration=10.0,
         )
         _create_ti(
-            dag_maker, session,
-            dag_id="dag_b", run_id="run_b",
+            dag_maker,
+            session,
+            dag_id="dag_b",
+            run_id="run_b",
             state=TaskInstanceState.SUCCESS.value,
-            start=start + timedelta(hours=1), duration=20.0,
+            start=start + timedelta(hours=1),
+            duration=20.0,
         )
 
         results = get_historical_runtimes("dag_a", TASK_ID, session=session)
@@ -336,9 +397,12 @@ class TestGetHistoricalRuntimes:
         """Handles task instances with null duration gracefully."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="run_null", state=TaskInstanceState.SUCCESS.value,
-            start=start, duration=None,
+            dag_maker,
+            session,
+            run_id="run_null",
+            state=TaskInstanceState.SUCCESS.value,
+            start=start,
+            duration=None,
         )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, session=session)
@@ -351,9 +415,12 @@ class TestGetHistoricalRuntimes:
         """Results are HistoricalRuntime dataclass instances."""
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
         _create_ti(
-            dag_maker, session,
-            run_id="run1", state=TaskInstanceState.SUCCESS.value,
-            start=start, duration=10.0,
+            dag_maker,
+            session,
+            run_id="run1",
+            state=TaskInstanceState.SUCCESS.value,
+            start=start,
+            duration=10.0,
         )
 
         results = get_historical_runtimes(DAG_ID, TASK_ID, session=session)

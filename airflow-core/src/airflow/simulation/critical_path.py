@@ -21,6 +21,7 @@ This module calculates a simple longest-path over the DAG task dependency
 graph using estimated runtimes. It produces a critical path, the edges along
 that path, and the task with the longest duration on the path.
 """
+
 from __future__ import annotations
 
 from collections import deque
