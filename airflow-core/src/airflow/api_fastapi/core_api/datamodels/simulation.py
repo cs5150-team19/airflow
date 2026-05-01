@@ -45,3 +45,8 @@ class SimulationResponse(BaseModel):
     total_estimated_seconds: int
     critical_path: CriticalPathResult
     predicted_outcome: str
+    # Probability in [0.0, 1.0] that every task in the DAG would succeed,
+    # computed by SuccessPredictor from historical task-state data.
+    success_probability: float
+    # Per-task success probabilities keyed by task_id.
+    task_success_probabilities: dict[str, float]

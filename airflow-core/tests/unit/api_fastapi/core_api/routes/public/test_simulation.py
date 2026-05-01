@@ -143,7 +143,6 @@ class TestRunSimulation(TestSimulationEndpoint):
 
         post_response = test_client.post(f"/dags/{DAG_ID}/simulate")
         assert post_response.status_code == 200
-        simulation_id = post_response.json()["simulation_id"]
 
         dag_runs_response = test_client.get(f"/dags/{DAG_ID}/dagRuns?run_type=simulation")
         assert dag_runs_response.status_code == 200
@@ -263,3 +262,102 @@ class TestSimulationAccessControl(TestSimulationEndpoint):
         response = unauthorized_test_client.get(f"/dags/{DAG_ID}/simulate/any-id")
 
         assert response.status_code == 403
+
+
+class TestSuccessPredictorIntegration(TestSimulationEndpoint):
+    """End-to-end test: seeded historical task states feed the predictor.
+
+    Verifies that ``success_probability`` and ``task_success_probabilities``
+    in the API response reflect the historical state distribution we seeded,
+    not a hardcoded value.
+    """
+
+    def _seed_history(self, session, *, dag_id, task_id, states):
+        """Insert one TaskInstance per state in *states* under separate DagRuns.
+
+        Each TI is given a distinct ``start_date`` so the predictor's
+        newest-first ordering is well-defined.
+        """
+        from datetime import timedelta
+
+        dag = self.dagbag.get_latest_version_of_dag(dag_id, session=session)
+        dag_version = DagVersion.get_latest_version(dag.dag_id, session=session)
+        # Find the source task on the DAG to construct TIs.
+        source_task = next(t for t in dag.tasks if t.task_id == task_id)
+
+        for index, state in enumerate(states):
+            run_id = f"HISTORY_{task_id}_{index}"
+            run_date = DEFAULT_TIME + timedelta(days=index)
+            dr = DagRun(
+                run_id=run_id,
+                dag_id=dag_id,
+                logical_date=run_date,
+                run_type=DagRunType.MANUAL,
+                state=DagRunState.SUCCESS if state == "success" else DagRunState.FAILED,
+            )
+            session.add(dr)
+            session.flush()
+
+            ti = TaskInstance(
+                task=source_task,
+                state=state,
+                map_index=-1,
+                dag_version_id=dag_version.id,
+            )
+            ti.dag_run = dr
+            ti.start_date = run_date
+            ti.end_date = run_date + timedelta(seconds=10)
+            session.add(ti)
+
+        session.commit()
+
+    def test_response_includes_success_probability_fields(self, test_client, session):
+        self.create_dag_run_with_tasks(session)
+
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "success_probability" in data
+        assert "task_success_probabilities" in data
+        assert 0.0 <= data["success_probability"] <= 1.0
+        for prob in data["task_success_probabilities"].values():
+            assert 0.0 <= prob <= 1.0
+
+    def test_no_history_returns_default_probability(self, test_client, session):
+        # Only the trigger DagRun exists (no historical runs); every task
+        # falls below min_runs and gets the default 0.5 probability.
+        self.create_dag_run_with_tasks(session)
+
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        data = response.json()
+        # Per-task probabilities should all be 0.5 (default) given no history.
+        for prob in data["task_success_probabilities"].values():
+            assert prob == pytest.approx(0.5)
+
+    def test_seeded_history_drives_per_task_probability(self, test_client, session):
+        # Seed 3 successes + 1 failure for one task → expect ~0.75 for that task.
+        self.create_dag_run_with_tasks(session)
+        # The example_python_operator DAG has known task ids; pick a real one.
+        dag = self.dagbag.get_latest_version_of_dag(DAG_ID, session=session)
+        target_task_id = dag.tasks[0].task_id
+
+        self._seed_history(
+            session,
+            dag_id=DAG_ID,
+            task_id=target_task_id,
+            states=["success", "success", "success", "failed"],
+        )
+
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        assert response.status_code == 200
+        data = response.json()
+        per_task = data["task_success_probabilities"]
+        assert per_task[target_task_id] == pytest.approx(0.75)
+        # Other tasks have no seeded history → still default 0.5.
+        for task_id, prob in per_task.items():
+            if task_id == target_task_id:
+                continue
+            assert prob == pytest.approx(0.5)

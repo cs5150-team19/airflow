@@ -21,6 +21,7 @@ import uuid
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 
+from airflow._shared.timezones import timezone
 from airflow.api_fastapi.auth.managers.models.resource_details import DagAccessEntity
 from airflow.api_fastapi.common.db.common import SessionDep
 from airflow.api_fastapi.common.router import AirflowRouter
@@ -35,11 +36,10 @@ from airflow.models.dagrun import DagRun
 from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance as TI
 from airflow.simulation.critical_path import get_critical_path
-from airflow.simulation.predictor_interface import DeterministicPredictor
 from airflow.simulation.predictors.historical_predictor import HistoricalPredictor
+from airflow.simulation.predictors.success_predictor import SuccessPredictor
 from airflow.utils.state import DagRunState
 from airflow.utils.types import DagRunTriggeredByType, DagRunType
-from airflow._shared.timezones import timezone
 
 simulation_router = AirflowRouter(tags=["Simulation"], prefix="/dags/{dag_id}")
 
@@ -144,13 +144,24 @@ def run_simulation(
 
     critical_path_response = get_critical_path(dag, task_responses)
 
+    success_predictor = SuccessPredictor()
+    dag_success_probability, task_success_probabilities = success_predictor.predict_dag_success(
+        dag_id,
+        [t["task_id"] for t in tasks],
+    )
+    # Derive a coarse pass/fail label from the probability so existing
+    # consumers of ``predicted_outcome`` keep working.
+    predicted_outcome = "success" if dag_success_probability >= 0.5 else "failure"
+
     response = SimulationResponse(
         simulation_id=simulation_id,
         dag_id=dag_id,
         task_estimates=task_responses,
         total_estimated_seconds=total_runtime,
-        critical_path=critical_path_response,  # bottle neck is returned in this function
-        predicted_outcome="success",  # TODO: replace with actual model prediction in the future implementation
+        critical_path=critical_path_response,
+        predicted_outcome=predicted_outcome,
+        success_probability=dag_success_probability,
+        task_success_probabilities=task_success_probabilities,
     )
 
     simulation_run_id = DagRunType.SIMULATION.generate_run_id(suffix=simulation_id)
