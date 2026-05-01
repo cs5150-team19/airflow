@@ -29,6 +29,8 @@ from unittest.mock import patch
 import pytest
 
 from airflow.simulation.predictors.success_predictor import (
+    _DAG_SUCCESS_STATES,
+    _TASK_SUCCESS_STATES,
     SuccessPredictor,
     WeightingMethod,
     _compute_weights,
@@ -38,7 +40,14 @@ from airflow.simulation.predictors.success_predictor import (
 DAG_ID = "test_dag"
 TASK_ID = "test_task"
 
-_PATCH_HISTORY = "airflow.simulation.predictors.success_predictor.get_task_state_history"
+_PATCH_TASK_HISTORY = (
+    "airflow.simulation.predictors.success_predictor.get_task_state_history"
+)
+_PATCH_DAG_HISTORY = (
+    "airflow.simulation.predictors.success_predictor.get_dag_run_state_history"
+)
+# Backwards-compat alias for tests that only exercise the per-task path.
+_PATCH_HISTORY = _PATCH_TASK_HISTORY
 
 
 # ---------------------------------------------------------------------------
@@ -87,38 +96,57 @@ class TestComputeWeights:
 
 class TestWeightedSuccessRate:
     def test_all_success_returns_one(self):
-        rate = _weighted_success_rate(["success"] * 4, [1.0] * 4)
+        rate = _weighted_success_rate(["success"] * 4, [1.0] * 4, _TASK_SUCCESS_STATES)
 
         assert rate == 1.0
 
     def test_all_failed_returns_zero(self):
-        rate = _weighted_success_rate(["failed"] * 4, [1.0] * 4)
+        rate = _weighted_success_rate(["failed"] * 4, [1.0] * 4, _TASK_SUCCESS_STATES)
 
         assert rate == 0.0
 
     def test_mixed_with_uniform_weights(self):
         rate = _weighted_success_rate(
-            ["success", "success", "success", "failed"], [1.0, 1.0, 1.0, 1.0]
+            ["success", "success", "success", "failed"],
+            [1.0, 1.0, 1.0, 1.0],
+            _TASK_SUCCESS_STATES,
         )
 
         assert rate == pytest.approx(0.75)
 
-    def test_non_success_states_count_as_failure(self):
-        # Per the predictor's contract, anything not "success" is a failure.
+    def test_task_success_set_includes_skipped_and_removed(self):
+        # Per-task semantics: ``skipped`` and ``removed`` count as success.
+        # Only ``failed`` and ``upstream_failed`` are real failures.
         rate = _weighted_success_rate(
-            ["success", "failed", "skipped", "upstream_failed"],
-            [1.0, 1.0, 1.0, 1.0],
+            ["success", "skipped", "removed", "failed", "upstream_failed"],
+            [1.0] * 5,
+            _TASK_SUCCESS_STATES,
         )
 
-        assert rate == pytest.approx(0.25)
+        # 3 of 5 (success + skipped + removed) counted as success.
+        assert rate == pytest.approx(0.6)
+
+    def test_dag_success_set_excludes_skipped(self):
+        # DAG-level semantics: only ``success`` counts. There is no DAG-level
+        # ``skipped`` state — but feeding one in would correctly count as
+        # not-success under the strict DAG set.
+        rate = _weighted_success_rate(
+            ["success", "success", "failed"],
+            [1.0, 1.0, 1.0],
+            _DAG_SUCCESS_STATES,
+        )
+
+        assert rate == pytest.approx(2 / 3)
 
     def test_recent_failure_weighs_more_with_linear_weighting(self):
         # Newest run failed, older 3 succeeded — linear weighting should pull
         # the rate below the uniform 0.75.
         states = ["failed", "success", "success", "success"]
-        uniform = _weighted_success_rate(states, [1.0, 1.0, 1.0, 1.0])
+        uniform = _weighted_success_rate(states, [1.0, 1.0, 1.0, 1.0], _TASK_SUCCESS_STATES)
         weighted = _weighted_success_rate(
-            states, _compute_weights(4, WeightingMethod.LINEAR, decay_lambda=0.1)
+            states,
+            _compute_weights(4, WeightingMethod.LINEAR, decay_lambda=0.1),
+            _TASK_SUCCESS_STATES,
         )
 
         assert weighted < uniform
@@ -126,7 +154,7 @@ class TestWeightedSuccessRate:
     def test_zero_total_weight_returns_zero(self):
         # Defensive: shouldn't happen in practice (weights are positive), but
         # the function must not divide by zero.
-        rate = _weighted_success_rate(["success"], [0.0])
+        rate = _weighted_success_rate(["success"], [0.0], _TASK_SUCCESS_STATES)
 
         assert rate == 0.0
 
@@ -154,6 +182,33 @@ class TestPredictTaskSuccess:
 
         with patch(_PATCH_HISTORY, return_value=["failed"] * 5):
             assert predictor.predict_task_success(DAG_ID, TASK_ID) == 0.0
+
+    def test_skipped_runs_count_as_success(self):
+        # Branching DAGs steer around tasks; ``skipped`` is normal operation,
+        # not a failure mode. Pinning this explicitly because the original
+        # implementation treated everything-but-success as failure and made
+        # branched-around tasks score very low.
+        predictor = SuccessPredictor(min_runs=3)
+
+        with patch(_PATCH_HISTORY, return_value=["skipped"] * 5):
+            assert predictor.predict_task_success(DAG_ID, TASK_ID) == 1.0
+
+    def test_mixed_success_and_skipped_returns_one(self):
+        predictor = SuccessPredictor(min_runs=3)
+
+        with patch(_PATCH_HISTORY, return_value=["success", "skipped", "skipped", "success"]):
+            assert predictor.predict_task_success(DAG_ID, TASK_ID) == 1.0
+
+    def test_failed_states_still_lower_score(self):
+        # ``failed`` and ``upstream_failed`` are the only states that should
+        # bring per-task probability below 1.0.
+        predictor = SuccessPredictor(min_runs=3)
+
+        with patch(
+            _PATCH_HISTORY, return_value=["success", "skipped", "failed", "upstream_failed"]
+        ):
+            # 2 of 4 (success + skipped) count; failed + upstream_failed do not.
+            assert predictor.predict_task_success(DAG_ID, TASK_ID) == pytest.approx(0.5)
 
     def test_uniform_weighting_returns_simple_ratio(self):
         # 3 of 4 = 0.75
@@ -225,62 +280,111 @@ class TestPredictTaskSuccess:
 # ---------------------------------------------------------------------------
 
 
+class TestPredictDagSuccessRate:
+    """``predict_dag_success_rate`` reads DagRun.state history directly."""
+
+    def test_returns_default_when_below_min_runs(self):
+        predictor = SuccessPredictor(min_runs=3, default_probability=0.42)
+
+        with patch(_PATCH_DAG_HISTORY, return_value=["success", "success"]):
+            assert predictor.predict_dag_success_rate(DAG_ID) == 0.42
+
+    def test_all_success_returns_one(self):
+        predictor = SuccessPredictor(min_runs=3)
+
+        with patch(_PATCH_DAG_HISTORY, return_value=["success"] * 5):
+            assert predictor.predict_dag_success_rate(DAG_ID) == 1.0
+
+    def test_all_failed_returns_zero(self):
+        predictor = SuccessPredictor(min_runs=3)
+
+        with patch(_PATCH_DAG_HISTORY, return_value=["failed"] * 5):
+            assert predictor.predict_dag_success_rate(DAG_ID) == 0.0
+
+    def test_mixed_returns_simple_ratio(self):
+        # 3 of 4 = 0.75
+        predictor = SuccessPredictor(min_runs=3)
+
+        with patch(
+            _PATCH_DAG_HISTORY,
+            return_value=["success", "success", "success", "failed"],
+        ):
+            assert predictor.predict_dag_success_rate(DAG_ID) == pytest.approx(0.75)
+
+    def test_uses_max_runs_as_limit_for_dag_query(self):
+        predictor = SuccessPredictor(max_runs=42, min_runs=3)
+
+        with patch(_PATCH_DAG_HISTORY, return_value=["success"] * 3) as mock_history:
+            predictor.predict_dag_success_rate(DAG_ID)
+
+            assert mock_history.call_args.kwargs["limit"] == 42
+
+
 class TestPredictDagSuccess:
-    def test_empty_task_list_returns_default(self):
-        predictor = SuccessPredictor(default_probability=0.42)
+    """``predict_dag_success`` returns (dag_prob, per_task_probs).
 
-        dag_prob, per_task = predictor.predict_dag_success(DAG_ID, [])
+    DAG probability comes from DagRun history, NOT from multiplying per-task
+    probabilities — this prevents geometric decay across many tasks and lets
+    branching DAGs (where many tasks are routinely skipped) score correctly.
+    """
 
-        assert dag_prob == 0.42
+    def test_empty_task_list_still_returns_dag_probability(self):
+        predictor = SuccessPredictor(min_runs=3)
+
+        with patch(_PATCH_DAG_HISTORY, return_value=["success"] * 3):
+            dag_prob, per_task = predictor.predict_dag_success(DAG_ID, [])
+
+        assert dag_prob == 1.0
         assert per_task == {}
 
-    def test_single_task_dag_probability_equals_task_probability(self):
+    def test_dag_probability_independent_of_per_task_probabilities(self):
+        # Per-task data says everything fails; DagRun data says everything
+        # succeeded. The DAG-level number must reflect the DagRun history.
+        # This is the bug fix for branching DAGs scoring as failure.
         predictor = SuccessPredictor(min_runs=3)
 
-        with patch(_PATCH_HISTORY, return_value=["success", "success", "success", "failed"]):
-            dag_prob, per_task = predictor.predict_dag_success(DAG_ID, ["t1"])
+        with patch(_PATCH_TASK_HISTORY, return_value=["failed"] * 3):
+            with patch(_PATCH_DAG_HISTORY, return_value=["success"] * 5):
+                dag_prob, per_task = predictor.predict_dag_success(DAG_ID, ["a", "b", "c"])
 
-        assert per_task == {"t1": pytest.approx(0.75)}
-        assert dag_prob == pytest.approx(0.75)
+        assert dag_prob == 1.0
+        # Per-task probabilities are still surfaced for the UI, just not
+        # multiplied into the DAG number.
+        assert per_task == {"a": 0.0, "b": 0.0, "c": 0.0}
 
-    def test_independent_tasks_multiply(self):
-        # t1 → 1.0, t2 → 0.5; expected DAG prob = 0.5
+    def test_branching_dag_scenario_scores_high(self):
+        # Regression test for the example_branch_operator_decorator bug:
+        # tasks routinely skipped should not pull DAG probability to zero,
+        # because (a) skipped now counts as task-level success and (b) the
+        # DAG number is computed from DagRun history.
         predictor = SuccessPredictor(min_runs=3)
 
-        def fake_history(dag_id, task_id, **_kwargs):
+        def fake_task_history(dag_id, task_id, **_kwargs):
             del dag_id
-            if task_id == "t1":
-                return ["success"] * 3
-            return ["success", "success", "failed", "failed"]
+            # ``branch_b`` is routinely skipped because branching steers
+            # around it; older skipped runs + 1 success on a recent pick.
+            if task_id == "branch_b":
+                return ["skipped", "skipped", "skipped", "success", "skipped"]
+            return ["success"] * 5
 
-        with patch(_PATCH_HISTORY, side_effect=fake_history):
-            dag_prob, per_task = predictor.predict_dag_success(DAG_ID, ["t1", "t2"])
+        with patch(_PATCH_TASK_HISTORY, side_effect=fake_task_history):
+            with patch(_PATCH_DAG_HISTORY, return_value=["success"] * 10):
+                dag_prob, per_task = predictor.predict_dag_success(
+                    DAG_ID, ["branch_a", "branch_b", "branch_c"]
+                )
 
-        assert per_task["t1"] == pytest.approx(1.0)
-        assert per_task["t2"] == pytest.approx(0.5)
-        assert dag_prob == pytest.approx(0.5)
-
-    def test_any_zero_probability_zeros_dag_probability(self):
-        # Independence assumption: if one task has 0% success, the DAG must too.
-        predictor = SuccessPredictor(min_runs=3)
-
-        def fake_history(dag_id, task_id, **_kwargs):
-            del dag_id
-            if task_id == "broken":
-                return ["failed"] * 3
-            return ["success"] * 3
-
-        with patch(_PATCH_HISTORY, side_effect=fake_history):
-            dag_prob, per_task = predictor.predict_dag_success(DAG_ID, ["ok", "broken"])
-
-        assert per_task["broken"] == 0.0
-        assert dag_prob == 0.0
+        assert dag_prob == 1.0
+        # branch_b: 5/5 (skipped + success both count) → 1.0
+        assert per_task["branch_b"] == pytest.approx(1.0)
+        assert per_task["branch_a"] == pytest.approx(1.0)
+        assert per_task["branch_c"] == pytest.approx(1.0)
 
     def test_per_task_dict_includes_every_requested_task_id(self):
         predictor = SuccessPredictor(min_runs=3)
 
-        with patch(_PATCH_HISTORY, return_value=["success"] * 3):
-            _, per_task = predictor.predict_dag_success(DAG_ID, ["a", "b", "c"])
+        with patch(_PATCH_TASK_HISTORY, return_value=["success"] * 3):
+            with patch(_PATCH_DAG_HISTORY, return_value=["success"] * 3):
+                _, per_task = predictor.predict_dag_success(DAG_ID, ["a", "b", "c"])
 
         assert set(per_task) == {"a", "b", "c"}
 

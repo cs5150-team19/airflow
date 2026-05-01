@@ -121,15 +121,9 @@ def run_simulation(
             )
 
     historical_predictor = HistoricalPredictor()
-    estimates = []
-    total_runtime = 0
-    for t in tasks:
-        task_runtime_estimate = historical_predictor.estimate_task(
-            t["task_id"],
-            t["operator_type"],
-        )
-        estimates.append(task_runtime_estimate)
-        total_runtime += task_runtime_estimate.estimated_seconds
+    estimates = [
+        historical_predictor.estimate_task(t["task_id"], t["operator_type"]) for t in tasks
+    ]
 
     simulation_id = str(uuid.uuid4())
     task_responses = [
@@ -143,6 +137,14 @@ def run_simulation(
     ]
 
     critical_path_response = get_critical_path(dag, task_responses)
+    # ``total_estimated_seconds`` reports the critical-path runtime — a true
+    # lower bound on wall-clock execution when tasks parallelize. Summing every
+    # task's runtime would double-count parallel branches and over-estimate.
+    estimated_seconds_by_task_id = {te.task_id: te.estimated_seconds for te in estimates}
+    total_runtime = sum(
+        estimated_seconds_by_task_id[task_id]
+        for task_id in critical_path_response.critical_path
+    )
 
     success_predictor = SuccessPredictor()
     dag_success_probability, task_success_probabilities = success_predictor.predict_dag_success(

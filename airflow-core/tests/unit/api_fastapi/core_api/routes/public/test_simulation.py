@@ -118,14 +118,20 @@ class TestRunSimulation(TestSimulationEndpoint):
         assert isinstance(data["task_estimates"], list)
         assert len(data["task_estimates"]) > 0
 
-    def test_total_equals_sum_of_task_estimates(self, test_client, session):
+    def test_total_equals_sum_along_critical_path(self, test_client, session):
+        # ``total_estimated_seconds`` is the critical-path runtime — a true
+        # lower bound on wall-clock execution under parallelism — not the
+        # serial sum of every task's estimate.
         self.create_dag_run_with_tasks(session)
 
         response = test_client.post(f"/dags/{DAG_ID}/simulate")
 
         data = response.json()
-        total = sum(te["estimated_seconds"] for te in data["task_estimates"])
-        assert data["total_estimated_seconds"] == total
+        estimates_by_id = {te["task_id"]: te["estimated_seconds"] for te in data["task_estimates"]}
+        expected = sum(
+            estimates_by_id[task_id] for task_id in data["critical_path"]["critical_path"]
+        )
+        assert data["total_estimated_seconds"] == expected
 
     def test_should_load_serialized_dag_when_dag_run_dag_is_missing(self, test_client, session):
         self.create_dag_run_with_tasks(session)
@@ -272,28 +278,35 @@ class TestSuccessPredictorIntegration(TestSimulationEndpoint):
     not a hardcoded value.
     """
 
-    def _seed_history(self, session, *, dag_id, task_id, states):
+    def _seed_history(self, session, *, dag_id, task_id, states, dag_run_states=None):
         """Insert one TaskInstance per state in *states* under separate DagRuns.
 
-        Each TI is given a distinct ``start_date`` so the predictor's
-        newest-first ordering is well-defined.
+        ``dag_run_states`` (optional) lets the caller decouple per-task state
+        from DagRun state — useful for the branching scenario where a task is
+        ``skipped`` but the surrounding DagRun ended in SUCCESS. When omitted,
+        the DagRun state mirrors the task state (success → SUCCESS, anything
+        else → FAILED).
         """
         from datetime import timedelta
 
         dag = self.dagbag.get_latest_version_of_dag(dag_id, session=session)
         dag_version = DagVersion.get_latest_version(dag.dag_id, session=session)
-        # Find the source task on the DAG to construct TIs.
         source_task = next(t for t in dag.tasks if t.task_id == task_id)
 
         for index, state in enumerate(states):
             run_id = f"HISTORY_{task_id}_{index}"
             run_date = DEFAULT_TIME + timedelta(days=index)
+            dr_state = (
+                DagRunState(dag_run_states[index])
+                if dag_run_states is not None
+                else (DagRunState.SUCCESS if state == "success" else DagRunState.FAILED)
+            )
             dr = DagRun(
                 run_id=run_id,
                 dag_id=dag_id,
                 logical_date=run_date,
                 run_type=DagRunType.MANUAL,
-                state=DagRunState.SUCCESS if state == "success" else DagRunState.FAILED,
+                state=dr_state,
             )
             session.add(dr)
             session.flush()
@@ -361,3 +374,65 @@ class TestSuccessPredictorIntegration(TestSimulationEndpoint):
             if task_id == target_task_id:
                 continue
             assert prob == pytest.approx(0.5)
+
+    def test_dag_probability_uses_dag_run_history_not_task_multiplication(
+        self, test_client, session
+    ):
+        # Regression test: the old implementation multiplied per-task
+        # probabilities, so a DAG with N tasks and no history would score
+        # ``0.5^N`` and predict failure. The fix uses DagRun history
+        # directly. With the seeded 3 SUCCESS + 1 FAILED DagRuns, the
+        # DAG-level probability should be ~0.75 regardless of task count.
+        self.create_dag_run_with_tasks(session)
+        dag = self.dagbag.get_latest_version_of_dag(DAG_ID, session=session)
+        target_task_id = dag.tasks[0].task_id
+
+        self._seed_history(
+            session,
+            dag_id=DAG_ID,
+            task_id=target_task_id,
+            states=["success", "success", "success", "failed"],
+        )
+
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        data = response.json()
+        # 3 of 4 seeded DagRuns are SUCCESS (the helper mirrors task state
+        # to DagRun state), so DAG-level should be ~0.75.
+        assert data["success_probability"] == pytest.approx(0.75)
+        assert data["predicted_outcome"] == "success"
+
+    def test_branching_dag_with_skipped_tasks_does_not_predict_failure(
+        self, test_client, session
+    ):
+        # Bug regression: example_branch_operator_decorator (and any branching
+        # DAG) routinely produces ``state="skipped"`` for branched-around
+        # tasks. The old code treated skipped as failure and multiplied
+        # per-task probabilities, so any branching DAG predicted failure.
+        # The fix counts skipped as task-level success and reads DAG-level
+        # probability from DagRun history (not from task-prob multiplication).
+        self.create_dag_run_with_tasks(session)
+        dag = self.dagbag.get_latest_version_of_dag(DAG_ID, session=session)
+        target_task_id = dag.tasks[0].task_id
+
+        # Simulate a task that's been skipped on most past runs (typical for
+        # a branched-around task) but the DAG itself succeeded each time.
+        self._seed_history(
+            session,
+            dag_id=DAG_ID,
+            task_id=target_task_id,
+            states=["success", "skipped", "skipped", "skipped", "skipped"],
+            dag_run_states=["success"] * 5,
+        )
+
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        data = response.json()
+        # The branched-around task scores 1.0 (all skipped + 1 success
+        # count as task-level success).
+        assert data["task_success_probabilities"][target_task_id] == pytest.approx(1.0)
+        # The DAG-level number reflects DagRun history (all 5 runs were
+        # marked SUCCESS by the helper) so the prediction is success, not
+        # failure.
+        assert data["success_probability"] == pytest.approx(1.0)
+        assert data["predicted_outcome"] == "success"

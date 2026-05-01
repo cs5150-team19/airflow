@@ -22,11 +22,21 @@ import math
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from airflow.simulation.data.historical_data_extractor import get_task_state_history
+from airflow.simulation.data.historical_data_extractor import (
+    get_dag_run_state_history,
+    get_task_state_history,
+)
 
-# Only ``success`` counts as a success outcome — everything else (failed,
-# upstream_failed, skipped, ...) reduces the probability.
-_SUCCESS_STATE: str = "success"
+# Per-task success states. ``skipped`` and ``removed`` indicate the DAG ran
+# normally — branching logic chose another path or the task was removed from
+# the DAG since the run was created. Treating them as failures would make
+# branching DAGs always score very low.
+_TASK_SUCCESS_STATES: frozenset[str] = frozenset({"success", "skipped", "removed"})
+
+# DAG-level success states. Only a fully-successful run counts; ``failed``
+# is a clear failure, and in-flight states (``running``, ``queued``) are
+# filtered upstream by the extractor.
+_DAG_SUCCESS_STATES: frozenset[str] = frozenset({"success"})
 
 _DEFAULT_LOOKBACK_DAYS: int = 30
 _DEFAULT_MAX_RUNS: int = 100
@@ -65,12 +75,22 @@ def _compute_weights(
     return [1.0] * num_runs
 
 
-def _weighted_success_rate(states: list[str], weights: list[float]) -> float:
-    """Compute the weighted fraction of states equal to ``success``."""
+def _weighted_success_rate(
+    states: list[str],
+    weights: list[float],
+    success_states: frozenset[str],
+) -> float:
+    """
+    Compute the weighted fraction of states that count as success.
+
+    ``success_states`` lets callers distinguish between per-task success
+    semantics (``skipped`` counts) and DAG-level semantics (only ``success``
+    counts).
+    """
     total = sum(weights)
     if total <= 0:
         return 0.0
-    success = sum(weight for state, weight in zip(states, weights) if state == _SUCCESS_STATE)
+    success = sum(weight for state, weight in zip(states, weights) if state in success_states)
     return success / total
 
 
@@ -78,11 +98,12 @@ class SuccessPredictor:
     """
     Predict success probability for tasks and DAGs from historical state data.
 
-    The probability is computed as the (optionally weighted) fraction of
-    historical runs in the ``success`` state. DAG-level probability assumes
-    independent task outcomes — ``P(DAG) = product(P(task_i))`` — which is
-    conservative; correlated failure modes (e.g. shared upstream) make the
-    real DAG-level probability higher.
+    Per-task probability is the (optionally weighted) fraction of historical
+    TaskInstance runs that ended in a non-failure state — ``success``,
+    ``skipped``, or ``removed``. DAG-level probability is computed
+    independently from historical ``DagRun.state`` values (success vs failed),
+    not by multiplying per-task probabilities — this matches "did the run
+    finish in SUCCESS" and avoids geometric decay across many tasks.
 
     When fewer than ``min_runs`` historical executions exist, the predictor
     returns ``default_probability`` (0.5 by default — a neutral signal).
@@ -118,16 +139,23 @@ class SuccessPredictor:
         self.weighting = weighting
         self.decay_lambda = decay_lambda
 
-    def predict_task_success(self, dag_id: str, task_id: str) -> float:
-        """Return the success probability for a single task in ``[0.0, 1.0]``."""
-        start_date = None
-        if self.lookback_days is not None:
-            start_date = datetime.now(tz=timezone.utc) - timedelta(days=self.lookback_days)
+    def _start_date(self) -> datetime | None:
+        if self.lookback_days is None:
+            return None
+        return datetime.now(tz=timezone.utc) - timedelta(days=self.lookback_days)
 
+    def predict_task_success(self, dag_id: str, task_id: str) -> float:
+        """
+        Return the success probability for a single task in ``[0.0, 1.0]``.
+
+        Treats ``skipped`` and ``removed`` states as success — they indicate
+        the DAG ran normally (e.g. branching steered around the task) and
+        should not lower the task's score.
+        """
         states = get_task_state_history(
             dag_id,
             task_id,
-            start_date=start_date,
+            start_date=self._start_date(),
             limit=self.max_runs,
         )
 
@@ -135,7 +163,28 @@ class SuccessPredictor:
             return self.default_probability
 
         weights = _compute_weights(len(states), self.weighting, self.decay_lambda)
-        return _weighted_success_rate(states, weights)
+        return _weighted_success_rate(states, weights, _TASK_SUCCESS_STATES)
+
+    def predict_dag_success_rate(self, dag_id: str) -> float:
+        """
+        Return the DAG-level success probability in ``[0.0, 1.0]``.
+
+        Computed from historical ``DagRun.state`` values rather than by
+        multiplying per-task probabilities. This matches the user's actual
+        question ("did the run finish in SUCCESS?") and avoids geometric
+        decay from independent-task multiplication.
+        """
+        states = get_dag_run_state_history(
+            dag_id,
+            start_date=self._start_date(),
+            limit=self.max_runs,
+        )
+
+        if len(states) < self.min_runs:
+            return self.default_probability
+
+        weights = _compute_weights(len(states), self.weighting, self.decay_lambda)
+        return _weighted_success_rate(states, weights, _DAG_SUCCESS_STATES)
 
     def predict_dag_success(
         self,
@@ -145,15 +194,13 @@ class SuccessPredictor:
         """
         Return ``(dag_probability, per_task_probabilities)``.
 
-        Each task's probability is computed independently; the DAG-level
-        probability is the product, treating tasks as independent. Returns
-        ``(default_probability, {})`` when ``task_ids`` is empty.
+        DAG probability comes from :meth:`predict_dag_success_rate` (DagRun
+        history). Per-task probabilities are computed independently from
+        :meth:`predict_task_success` and exposed for the UI table — they no
+        longer feed into the DAG-level number.
         """
-        if not task_ids:
-            return self.default_probability, {}
-
         per_task = {
             task_id: self.predict_task_success(dag_id, task_id) for task_id in task_ids
         }
-        dag_probability = math.prod(per_task.values())
+        dag_probability = self.predict_dag_success_rate(dag_id)
         return dag_probability, per_task

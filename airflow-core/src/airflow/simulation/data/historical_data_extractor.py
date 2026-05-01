@@ -25,6 +25,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from airflow.models.dagrun import DagRun
 from airflow.models.taskinstance import TaskInstance
 from airflow.utils.session import NEW_SESSION, provide_session
 from airflow.utils.state import TaskInstanceState
@@ -252,6 +253,59 @@ def get_task_state_history(
         stmt = stmt.where(TaskInstance.is_simulation.is_(False))
 
     stmt = stmt.order_by(TaskInstance.start_date.desc()).limit(limit)
+
+    rows = session.execute(stmt).all()
+
+    return [row.state for row in rows]
+
+
+@provide_session
+def get_dag_run_state_history(
+    dag_id: str,
+    *,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    exclude_simulations: bool = True,
+    limit: int = DEFAULT_LIMIT,
+    session: Session = NEW_SESSION,
+) -> list[str]:
+    """
+    Return DagRun states for a DAG, ordered newest-first.
+
+    Used by :class:`SuccessPredictor` for DAG-level success prediction. Returns
+    every recorded DagRun state (``success``, ``failed``, ...). Unlike per-task
+    state queries, only terminal DagRun outcomes are meaningful here, so
+    in-flight states (``running``, ``queued``) are filtered out.
+
+    Args:
+        dag_id: The DAG identifier.
+        start_date: Only include runs that started on or after this datetime.
+        end_date: Only include runs that started on or before this datetime.
+        exclude_simulations: When *True*, exclude DagRuns flagged as simulations.
+        limit: Maximum number of records to return. Capped at :data:`DEFAULT_LIMIT`.
+        session: SQLAlchemy session (provided by ``@provide_session``).
+
+    Returns:
+        A list of state strings ordered by ``start_date`` descending (most
+        recent first).
+    """
+    limit = min(max(limit, 1), DEFAULT_LIMIT)
+
+    stmt = select(DagRun.state, DagRun.start_date).where(
+        DagRun.dag_id == dag_id,
+        DagRun.state.in_(("success", "failed")),
+    )
+
+    if start_date is not None:
+        stmt = stmt.where(DagRun.start_date >= start_date)
+
+    if end_date is not None:
+        stmt = stmt.where(DagRun.start_date <= end_date)
+
+    if exclude_simulations and hasattr(DagRun, "is_simulation"):
+        stmt = stmt.where(DagRun.is_simulation.is_(False))
+
+    stmt = stmt.order_by(DagRun.start_date.desc()).limit(limit)
 
     rows = session.execute(stmt).all()
 
