@@ -94,7 +94,11 @@ export const buildTaskInstanceUrl = (params: {
                          : `/dags/${dagId}/runs/${runId}/tasks/${groupPath}${taskId}`;
 
   let finalPath = base;
-  if (isMapped) {
+  // Skip the /mapped suffix for task groups: dynamic task groups have
+  // isMapped=true but no /tasks/group/:groupId/mapped route exists.
+  // Restores the upstream guard from PR #63205 that was lost when this
+  // function was restructured to support isSimulating.
+  if (isMapped && !isGroup) {
     finalPath += `/mapped`;
     if (mapIndex !== undefined && mapIndex !== "-1") {
       finalPath += `/${mapIndex}`;
