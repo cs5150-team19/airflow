@@ -15,12 +15,19 @@ import { FiClock } from "react-icons/fi";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useDagServiceGetDagDetails } from "openapi/queries";
+import { formatProbabilityPercent } from "src/utils/simulationDisplay";
 
 interface TaskEstimate {
   task_id: string;
   operator_type: string;
   estimated_seconds: number;
   confidence: number;
+  // Counts of historical (dag_id, task_id) entries the predictors saw —
+  // total, success-state count, failed-state count (failed + upstream_failed).
+  // Optional because older simulation reports won't include them.
+  historical_total?: number;
+  historical_success?: number;
+  historical_failed?: number;
 }
 
 interface CriticalPathResult {
@@ -36,6 +43,10 @@ interface SimulationReport {
   total_estimated_seconds: number;
   critical_path: CriticalPathResult;
   predicted_outcome: string;
+  // Optional because reports persisted before the SuccessPredictor backend
+  // landed will not include them.
+  success_probability?: number;
+  task_success_probabilities?: Record<string, number>;
 }
 
 const getLatestSimulationId = (dagId: string): string | null => {
@@ -181,6 +192,16 @@ export const Simulation = () => {
                   </Text>
                 </HStack>
               </GridItem>
+              {report.success_probability !== undefined ? (
+                <GridItem>
+                  <Text fontSize="sm" fontWeight="medium" color="fg.muted">
+                    DAG Success Probability
+                  </Text>
+                  <Text fontSize="lg" fontWeight="bold" mt={1}>
+                    {formatProbabilityPercent(report.success_probability)}
+                  </Text>
+                </GridItem>
+              ) : null}
               <GridItem>
                 <Text fontSize="sm" fontWeight="medium" color="fg.muted">
                   Task Count
@@ -212,17 +233,40 @@ export const Simulation = () => {
                     <Table.ColumnHeader>Operator</Table.ColumnHeader>
                     <Table.ColumnHeader>Estimated Seconds</Table.ColumnHeader>
                     <Table.ColumnHeader>Confidence</Table.ColumnHeader>
+                    <Table.ColumnHeader>Success Probability</Table.ColumnHeader>
+                    <Table.ColumnHeader>History (Total)</Table.ColumnHeader>
+                    <Table.ColumnHeader>Succeeded</Table.ColumnHeader>
+                    <Table.ColumnHeader>Failed</Table.ColumnHeader>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {report.task_estimates.map((taskEstimate) => (
-                    <Table.Row key={taskEstimate.task_id}>
-                      <Table.Cell>{taskEstimate.task_id}</Table.Cell>
-                      <Table.Cell>{taskEstimate.operator_type}</Table.Cell>
-                      <Table.Cell>{taskEstimate.estimated_seconds}</Table.Cell>
-                      <Table.Cell>{(taskEstimate.confidence * 100).toFixed(0)}%</Table.Cell>
-                    </Table.Row>
-                  ))}
+                  {report.task_estimates.map((taskEstimate) => {
+                    const probability = report.task_success_probabilities?.[taskEstimate.task_id];
+                    // History columns render "—" when there is zero same-(dag_id,
+                    // task_id) data — the predictor fell back to operator-type
+                    // history or the deterministic heuristic.
+                    const total = taskEstimate.historical_total ?? 0;
+                    const hasHistory = total > 0;
+
+                    return (
+                      <Table.Row key={taskEstimate.task_id}>
+                        <Table.Cell>{taskEstimate.task_id}</Table.Cell>
+                        <Table.Cell>{taskEstimate.operator_type}</Table.Cell>
+                        <Table.Cell>{taskEstimate.estimated_seconds}</Table.Cell>
+                        <Table.Cell>{(taskEstimate.confidence * 100).toFixed(0)}%</Table.Cell>
+                        <Table.Cell>
+                          {probability === undefined ? "—" : formatProbabilityPercent(probability)}
+                        </Table.Cell>
+                        <Table.Cell>{hasHistory ? total : "—"}</Table.Cell>
+                        <Table.Cell>
+                          {hasHistory ? (taskEstimate.historical_success ?? 0) : "—"}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {hasHistory ? (taskEstimate.historical_failed ?? 0) : "—"}
+                        </Table.Cell>
+                      </Table.Row>
+                    );
+                  })}
                 </Table.Body>
               </Table.Root>
             </Box>

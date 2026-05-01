@@ -1,6 +1,7 @@
 export type SimulationDisplayOptions = {
   showCriticalPath: boolean;
   showDurationBottleneck: boolean;
+  showSuccessProbability: boolean;
 };
 
 export type SimulationTaskDisplayMetadata = {
@@ -22,7 +23,17 @@ export type SimulationCriticalPath = {
 export type SimulationReportLike = {
   task_estimates: Array<SimulationTaskEstimate>;
   critical_path: SimulationCriticalPath;
+  // Per-task success probability in [0.0, 1.0], keyed by task_id. Optional
+  // because reports produced before the SuccessPredictor backend landed will
+  // not include it.
+  task_success_probabilities?: Record<string, number>;
+  // DAG-level success probability in [0.0, 1.0]. Optional for the same reason.
+  success_probability?: number;
 };
+
+// Format a probability in [0.0, 1.0] as a one-decimal percentage string.
+export const formatProbabilityPercent = (probability: number): string =>
+  `${(probability * 100).toFixed(1)}%`;
 
 type SimulationEdge = {
   source: string;
@@ -42,6 +53,7 @@ const getEstimatedSecondsByTaskId = (
 export const getSimulationDisplayOptions = (searchParams: URLSearchParams): SimulationDisplayOptions => ({
   showCriticalPath: searchParams.get("sim_cp") === "1",
   showDurationBottleneck: searchParams.get("sim_duration") === "1",
+  showSuccessProbability: searchParams.get("sim_success") === "1",
 });
 
 const getCriticalPathTaskIds = (
@@ -98,6 +110,13 @@ const getMetricLabel = (
     const estimatedSeconds = estimatedSecondsByTaskId.get(taskId);
     if (estimatedSeconds !== undefined) {
       labels.push(`Dur: ${estimatedSeconds}s`);
+    }
+  }
+
+  if (options.showSuccessProbability) {
+    const probability = simulationReport?.task_success_probabilities?.[taskId];
+    if (probability !== undefined) {
+      labels.push(`Success: ${formatProbabilityPercent(probability)}`);
     }
   }
 

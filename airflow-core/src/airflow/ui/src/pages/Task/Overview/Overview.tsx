@@ -41,6 +41,7 @@ import TimeRangeSelector from "src/components/TimeRangeSelector";
 import { TrendCountButton } from "src/components/TrendCountButton";
 import { SearchParamsKeys } from "src/constants/searchParams";
 import { isStatePending, useAutoRefresh } from "src/utils";
+import { formatProbabilityPercent } from "src/utils/simulationDisplay";
 
 const defaultHour = "24";
 
@@ -49,6 +50,11 @@ interface SimulationTaskEstimate {
   operator_type: string;
   estimated_seconds: number;
   confidence: number;
+  // Per-task success probability in [0.0, 1.0]. Populated by the fetch helper
+  // from the report's ``task_success_probabilities`` map. Optional because
+  // reports persisted before the SuccessPredictor backend landed will not
+  // include it.
+  success_probability?: number;
 }
 
 type LatestSimulationRecord = {
@@ -75,6 +81,7 @@ const getLatestSimulationRecord = (dagId: string): LatestSimulationRecord | null
 
 interface SimulationReport {
   task_estimates: SimulationTaskEstimate[];
+  task_success_probabilities?: Record<string, number>;
 }
 
 const fetchSimulationTaskEstimate = async (
@@ -96,7 +103,15 @@ const fetchSimulationTaskEstimate = async (
   }
 
   const data = (await response.json()) as SimulationReport;
-  return data.task_estimates.find((estimate) => estimate.task_id === taskId) ?? null;
+  const estimate = data.task_estimates.find((te) => te.task_id === taskId);
+  if (estimate === undefined) {
+    return null;
+  }
+
+  return {
+    ...estimate,
+    success_probability: data.task_success_probabilities?.[taskId],
+  };
 };
 
 export const Overview = () => {
@@ -232,6 +247,16 @@ export const Overview = () => {
                   </Text>
                   <Text fontSize="lg" fontWeight="bold">
                     {(simulationTask.confidence * 100).toFixed(0)}%
+                  </Text>
+                </GridItem>
+                <GridItem>
+                  <Text fontSize="sm" fontWeight="medium" color="fg.muted">
+                    Success Probability
+                  </Text>
+                  <Text fontSize="lg" fontWeight="bold">
+                    {simulationTask.success_probability === undefined
+                      ? "—"
+                      : formatProbabilityPercent(simulationTask.success_probability)}
                   </Text>
                 </GridItem>
               </Grid>
