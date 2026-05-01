@@ -46,7 +46,10 @@ class TestMigrationMetadata:
     def test_down_revision_chains_off_previous_head(self, migration):
         # Hard-pin so a future migration insertion doesn't silently re-parent
         # this one (which would corrupt the migration graph for existing DBs).
-        assert migration.down_revision == "9fabad868fdb"
+        # Re-parented from "9fabad868fdb" to "fde9ed84d07b" after main brought
+        # in 0112_3_3_0_add_task_state_and_asset_state_tables, which would
+        # otherwise share our parent and cause "multiple heads" errors.
+        assert migration.down_revision == "fde9ed84d07b"
 
     def test_no_branch_labels(self, migration):
         assert migration.branch_labels is None
