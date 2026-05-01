@@ -276,6 +276,72 @@ class TestPredictTaskSuccess:
 
 
 # ---------------------------------------------------------------------------
+# SuccessPredictor.count_task_outcomes
+# ---------------------------------------------------------------------------
+
+
+class TestCountTaskOutcomes:
+    def test_returns_zero_counts_when_no_history(self):
+        predictor = SuccessPredictor()
+
+        with patch(_PATCH_HISTORY, return_value=[]):
+            assert predictor.count_task_outcomes(DAG_ID, TASK_ID) == (0, 0, 0)
+
+    def test_counts_pure_success_history(self):
+        predictor = SuccessPredictor()
+
+        with patch(_PATCH_HISTORY, return_value=["success"] * 5):
+            total, success, failed = predictor.count_task_outcomes(DAG_ID, TASK_ID)
+
+        assert (total, success, failed) == (5, 5, 0)
+
+    def test_counts_pure_failed_history(self):
+        predictor = SuccessPredictor()
+
+        with patch(_PATCH_HISTORY, return_value=["failed"] * 4):
+            assert predictor.count_task_outcomes(DAG_ID, TASK_ID) == (4, 0, 4)
+
+    def test_failed_count_includes_upstream_failed(self):
+        # ``upstream_failed`` is a real failure mode (a parent task failed),
+        # so it counts toward the ``failed`` column even though the task
+        # itself never ran.
+        predictor = SuccessPredictor()
+
+        with patch(_PATCH_HISTORY, return_value=["failed", "upstream_failed", "success"]):
+            total, success, failed = predictor.count_task_outcomes(DAG_ID, TASK_ID)
+
+        assert (total, success, failed) == (3, 1, 2)
+
+    def test_skipped_and_removed_count_in_total_only(self):
+        # Skipped/removed are part of normal operation — they appear in the
+        # total but not in either success or failed.
+        predictor = SuccessPredictor()
+
+        with patch(
+            _PATCH_HISTORY,
+            return_value=["success", "skipped", "removed", "failed"],
+        ):
+            total, success, failed = predictor.count_task_outcomes(DAG_ID, TASK_ID)
+
+        assert (total, success, failed) == (4, 1, 1)
+        # Sanity: the gap between total and (success + failed) is the count
+        # of "neither" states (here: skipped + removed = 2).
+        assert total - (success + failed) == 2
+
+    def test_uses_same_lookback_and_limit_as_predict_task_success(self):
+        # The counts must reflect what the predictor sees, not a different
+        # subset of history — same start_date and limit kwargs.
+        predictor = SuccessPredictor(lookback_days=14, max_runs=42)
+
+        with patch(_PATCH_HISTORY, return_value=["success"] * 3) as mock_history:
+            predictor.count_task_outcomes(DAG_ID, TASK_ID)
+
+            kwargs = mock_history.call_args.kwargs
+            assert kwargs["start_date"] is not None
+            assert kwargs["limit"] == 42
+
+
+# ---------------------------------------------------------------------------
 # SuccessPredictor.predict_dag_success
 # ---------------------------------------------------------------------------
 

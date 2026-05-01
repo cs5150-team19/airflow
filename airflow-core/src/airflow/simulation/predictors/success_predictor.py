@@ -186,6 +186,27 @@ class SuccessPredictor:
         weights = _compute_weights(len(states), self.weighting, self.decay_lambda)
         return _weighted_success_rate(states, weights, _DAG_SUCCESS_STATES)
 
+    def count_task_outcomes(self, dag_id: str, task_id: str) -> tuple[int, int, int]:
+        """
+        Return ``(total, success, failed)`` counts of historical task instances.
+
+        Uses the same lookback window and limit as :meth:`predict_task_success`,
+        so the counts reflect exactly the data the predictor sees. ``failed``
+        counts both ``failed`` and ``upstream_failed`` states; the difference
+        between ``total`` and ``success + failed`` is made up of other
+        terminal states (``skipped``, ``removed``).
+        """
+        states = get_task_state_history(
+            dag_id,
+            task_id,
+            start_date=self._start_date(),
+            limit=self.max_runs,
+        )
+        total = len(states)
+        success = sum(1 for state in states if state == "success")
+        failed = sum(1 for state in states if state in {"failed", "upstream_failed"})
+        return total, success, failed
+
     def predict_dag_success(
         self,
         dag_id: str,

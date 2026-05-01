@@ -26,6 +26,16 @@ class TaskSimulationResponse(BaseModel):
     operator_type: str
     estimated_seconds: int
     confidence: float
+    # Counts of historical (dag_id, task_id) entries the predictors used —
+    # same lookback window as the SuccessPredictor. ``historical_total`` is the
+    # number of records available; ``historical_success`` and
+    # ``historical_failed`` count the ``success`` and ``failed``/``upstream_failed``
+    # subsets. Other terminal states (``skipped``, ``removed``) are included in
+    # the total but not in either subset, so the two columns will not generally
+    # add up to the total.
+    historical_total: int = 0
+    historical_success: int = 0
+    historical_failed: int = 0
 
 
 class CriticalPathResult(BaseModel):

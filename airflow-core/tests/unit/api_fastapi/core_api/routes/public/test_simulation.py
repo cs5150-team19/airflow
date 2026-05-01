@@ -402,6 +402,37 @@ class TestSuccessPredictorIntegration(TestSimulationEndpoint):
         assert data["success_probability"] == pytest.approx(0.75)
         assert data["predicted_outcome"] == "success"
 
+    def test_response_includes_per_task_history_counts(self, test_client, session):
+        # Seed a known mix of states so we can pin the count fields end-to-end.
+        self.create_dag_run_with_tasks(session)
+        dag = self.dagbag.get_latest_version_of_dag(DAG_ID, session=session)
+        target_task_id = dag.tasks[0].task_id
+
+        # 2 success, 1 failed, 1 upstream_failed, 1 skipped → counts should be:
+        # total=5, success=2, failed=2 (failed + upstream_failed), and skipped is in total only.
+        self._seed_history(
+            session,
+            dag_id=DAG_ID,
+            task_id=target_task_id,
+            states=["success", "success", "failed", "upstream_failed", "skipped"],
+        )
+
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+        data = response.json()
+        target = next(te for te in data["task_estimates"] if te["task_id"] == target_task_id)
+
+        assert target["historical_total"] == 5
+        assert target["historical_success"] == 2
+        assert target["historical_failed"] == 2
+
+        # Other tasks have no seeded history → all zeros.
+        for te in data["task_estimates"]:
+            if te["task_id"] == target_task_id:
+                continue
+            assert te["historical_total"] == 0
+            assert te["historical_success"] == 0
+            assert te["historical_failed"] == 0
+
     def test_branching_dag_with_skipped_tasks_does_not_predict_failure(
         self, test_client, session
     ):

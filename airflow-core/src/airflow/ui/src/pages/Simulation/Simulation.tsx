@@ -22,6 +22,12 @@ interface TaskEstimate {
   operator_type: string;
   estimated_seconds: number;
   confidence: number;
+  // Counts of historical (dag_id, task_id) entries the predictors saw —
+  // total, success-state count, failed-state count (failed + upstream_failed).
+  // Optional because older simulation reports won't include them.
+  historical_total?: number;
+  historical_success?: number;
+  historical_failed?: number;
 }
 
 interface CriticalPathResult {
@@ -228,11 +234,19 @@ export const Simulation = () => {
                     <Table.ColumnHeader>Estimated Seconds</Table.ColumnHeader>
                     <Table.ColumnHeader>Confidence</Table.ColumnHeader>
                     <Table.ColumnHeader>Success Probability</Table.ColumnHeader>
+                    <Table.ColumnHeader>History (Total)</Table.ColumnHeader>
+                    <Table.ColumnHeader>Succeeded</Table.ColumnHeader>
+                    <Table.ColumnHeader>Failed</Table.ColumnHeader>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
                   {report.task_estimates.map((taskEstimate) => {
                     const probability = report.task_success_probabilities?.[taskEstimate.task_id];
+                    // History columns render "—" when there is zero same-(dag_id,
+                    // task_id) data — the predictor fell back to operator-type
+                    // history or the deterministic heuristic.
+                    const total = taskEstimate.historical_total ?? 0;
+                    const hasHistory = total > 0;
 
                     return (
                       <Table.Row key={taskEstimate.task_id}>
@@ -242,6 +256,13 @@ export const Simulation = () => {
                         <Table.Cell>{(taskEstimate.confidence * 100).toFixed(0)}%</Table.Cell>
                         <Table.Cell>
                           {probability === undefined ? "—" : formatProbabilityPercent(probability)}
+                        </Table.Cell>
+                        <Table.Cell>{hasHistory ? total : "—"}</Table.Cell>
+                        <Table.Cell>
+                          {hasHistory ? (taskEstimate.historical_success ?? 0) : "—"}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {hasHistory ? (taskEstimate.historical_failed ?? 0) : "—"}
                         </Table.Cell>
                       </Table.Row>
                     );

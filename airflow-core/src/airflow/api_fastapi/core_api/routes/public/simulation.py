@@ -121,20 +121,28 @@ def run_simulation(
             )
 
     historical_predictor = HistoricalPredictor()
+    success_predictor = SuccessPredictor()
     estimates = [
         historical_predictor.estimate_task(t["task_id"], t["operator_type"]) for t in tasks
     ]
 
     simulation_id = str(uuid.uuid4())
-    task_responses = [
-        TaskSimulationResponse(
-            task_id=te.task_id,
-            operator_type=te.operator_type,
-            estimated_seconds=te.estimated_seconds,
-            confidence=te.confidence,
+    task_responses = []
+    for te in estimates:
+        total, success_count, failed_count = success_predictor.count_task_outcomes(
+            dag_id, te.task_id
         )
-        for te in estimates
-    ]
+        task_responses.append(
+            TaskSimulationResponse(
+                task_id=te.task_id,
+                operator_type=te.operator_type,
+                estimated_seconds=te.estimated_seconds,
+                confidence=te.confidence,
+                historical_total=total,
+                historical_success=success_count,
+                historical_failed=failed_count,
+            )
+        )
 
     critical_path_response = get_critical_path(dag, task_responses)
     # ``total_estimated_seconds`` reports the critical-path runtime — a true
@@ -146,7 +154,6 @@ def run_simulation(
         for task_id in critical_path_response.critical_path
     )
 
-    success_predictor = SuccessPredictor()
     dag_success_probability, task_success_probabilities = success_predictor.predict_dag_success(
         dag_id,
         [t["task_id"] for t in tasks],
