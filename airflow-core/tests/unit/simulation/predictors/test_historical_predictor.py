@@ -25,15 +25,15 @@ import pytest
 
 from airflow.simulation.data.historical_data_extractor import HistoricalRuntime
 from airflow.simulation.predictor_interface import (
-    OperatorType,
     _DETERMINISTIC_CONFIDENCE,
     _OPERATOR_RUNTIME_SECONDS,
+    OperatorType,
 )
 from airflow.simulation.predictors.historical_predictor import (
-    AggregationMethod,
-    HistoricalPredictor,
     _OPERATOR_BASE_CONFIDENCE,
     _OPERATOR_MAX_CONFIDENCE,
+    AggregationMethod,
+    HistoricalPredictor,
     _aggregate,
     _compute_confidence,
     _filter_outliers,
@@ -45,7 +45,12 @@ TASK_ID = "test_task"
 CONTEXT = {"dag_id": DAG_ID}
 
 _PATCH_EXACT = "airflow.simulation.predictors.historical_predictor.get_historical_runtimes"
-_PATCH_OPERATOR = "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_operator"
+_PATCH_OPERATOR = (
+    "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_operator"
+)
+_PATCH_FINGERPRINT = (
+    "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_fingerprint"
+)
 
 
 def _make_runtime(run_id: str, duration: float | None) -> HistoricalRuntime:
@@ -384,3 +389,130 @@ class TestHistoricalPredictorFullFallback:
 
         # Both have 5 runs < min_runs=10, falls to heuristic
         assert result.confidence == _DETERMINISTIC_CONFIDENCE
+
+
+# ---------------------------------------------------------------------------
+# Level 2: cross-DAG fingerprint match
+# ---------------------------------------------------------------------------
+
+
+_FINGERPRINT_CONTEXT = {"dag_id": DAG_ID, "task_fingerprint": "abc123"}
+
+
+class TestHistoricalPredictorFingerprintFallback:
+    """Pin the fingerprint fallback's position between exact match and operator-only."""
+
+    def test_fingerprint_used_when_exact_insufficient(self):
+        # Exact match has only 1 run (below min_runs); fingerprint has plenty.
+        exact_runtimes = [_make_runtime("r1", 10.0)]
+        fp_runtimes = [_make_runtime(f"r{i}", 100.0) for i in range(5)]
+
+        predictor = HistoricalPredictor(filter_outliers=False)
+
+        with (
+            patch(_PATCH_EXACT, return_value=exact_runtimes),
+            patch(_PATCH_FINGERPRINT, return_value=fp_runtimes) as fp_mock,
+            patch(_PATCH_OPERATOR, return_value=[]) as op_mock,
+        ):
+            result = predictor.estimate_task(
+                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
+            )
+
+        # Result reflects fingerprint data (median=100), not exact (10).
+        assert result.estimated_seconds == 100
+        # Operator query should not even be reached.
+        op_mock.assert_not_called()
+        # Fingerprint query was called with the fingerprint from context.
+        fp_mock.assert_called_once()
+        assert fp_mock.call_args.args[0] == "abc123"
+
+    def test_fingerprint_skipped_when_context_lacks_fingerprint(self):
+        # Context has no "task_fingerprint" key — predictor must skip Level 2
+        # and fall through to operator-type without ever calling the
+        # fingerprint extractor.
+        exact_runtimes = [_make_runtime("r1", 10.0)]
+        operator_runtimes = [_make_runtime(f"r{i}", 50.0) for i in range(5)]
+
+        predictor = HistoricalPredictor(filter_outliers=False)
+
+        with (
+            patch(_PATCH_EXACT, return_value=exact_runtimes),
+            patch(_PATCH_FINGERPRINT, return_value=[]) as fp_mock,
+            patch(_PATCH_OPERATOR, return_value=operator_runtimes),
+        ):
+            predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
+
+        fp_mock.assert_not_called()
+
+    def test_fingerprint_skipped_when_fingerprint_is_none(self):
+        # An explicit None fingerprint (the helper's "no signal" return) should
+        # also skip Level 2.
+        predictor = HistoricalPredictor(filter_outliers=False)
+
+        with (
+            patch(_PATCH_EXACT, return_value=[]),
+            patch(_PATCH_FINGERPRINT, return_value=[]) as fp_mock,
+            patch(_PATCH_OPERATOR, return_value=[]),
+        ):
+            predictor.estimate_task(
+                TASK_ID,
+                OperatorType.PYTHON,
+                {"dag_id": DAG_ID, "task_fingerprint": None},
+            )
+
+        fp_mock.assert_not_called()
+
+    def test_fingerprint_falls_through_when_below_min_runs(self):
+        # Fingerprint level returns 1 run (below min_runs); predictor should
+        # fall through to operator-type instead of using bad data.
+        operator_runtimes = [_make_runtime(f"r{i}", 50.0) for i in range(5)]
+
+        predictor = HistoricalPredictor(filter_outliers=False)
+
+        with (
+            patch(_PATCH_EXACT, return_value=[]),
+            patch(_PATCH_FINGERPRINT, return_value=[_make_runtime("only", 100.0)]),
+            patch(_PATCH_OPERATOR, return_value=operator_runtimes),
+        ):
+            result = predictor.estimate_task(
+                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
+            )
+
+        # Result should reflect the operator-level estimate (50), not the
+        # singleton fingerprint match (100).
+        assert result.estimated_seconds == 50
+
+    def test_fingerprint_confidence_is_between_exact_and_operator(self):
+        # Same number of samples at fingerprint and operator levels — verify
+        # the confidence ordering: exact > fingerprint > operator > heuristic.
+        runtimes = [_make_runtime(f"r{i}", 50.0) for i in range(5)]
+
+        predictor = HistoricalPredictor(filter_outliers=False)
+
+        with (
+            patch(_PATCH_EXACT, return_value=runtimes),
+            patch(_PATCH_FINGERPRINT, return_value=[]),
+            patch(_PATCH_OPERATOR, return_value=[]),
+        ):
+            exact_result = predictor.estimate_task(
+                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
+            )
+        with (
+            patch(_PATCH_EXACT, return_value=[]),
+            patch(_PATCH_FINGERPRINT, return_value=runtimes),
+            patch(_PATCH_OPERATOR, return_value=[]),
+        ):
+            fp_result = predictor.estimate_task(
+                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
+            )
+        with (
+            patch(_PATCH_EXACT, return_value=[]),
+            patch(_PATCH_FINGERPRINT, return_value=[]),
+            patch(_PATCH_OPERATOR, return_value=runtimes),
+        ):
+            op_result = predictor.estimate_task(
+                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
+            )
+
+        assert exact_result.confidence > fp_result.confidence > op_result.confidence
+        assert op_result.confidence > _DETERMINISTIC_CONFIDENCE

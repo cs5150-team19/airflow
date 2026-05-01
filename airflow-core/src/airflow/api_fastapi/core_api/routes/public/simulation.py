@@ -36,6 +36,7 @@ from airflow.models.dagrun import DagRun
 from airflow.models.serialized_dag import SerializedDagModel
 from airflow.models.taskinstance import TaskInstance as TI
 from airflow.simulation.critical_path import get_critical_path
+from airflow.simulation.fingerprint import compute_task_fingerprint
 from airflow.simulation.predictors.historical_predictor import HistoricalPredictor
 from airflow.simulation.predictors.success_predictor import SuccessPredictor
 from airflow.utils.state import DagRunState
@@ -122,9 +123,22 @@ def run_simulation(
 
     historical_predictor = HistoricalPredictor()
     success_predictor = SuccessPredictor()
-    estimates = [
-        historical_predictor.estimate_task(t["task_id"], t["operator_type"]) for t in tasks
-    ]
+
+    # Compute a fingerprint per task so the runtime predictor can fall through
+    # to cross-DAG history of the same callable / bash command / SQL when the
+    # exact (dag_id, task_id) pair lacks enough history.
+    dag_task_dict = getattr(dag, "task_dict", {}) or {}
+    estimates = []
+    for t in tasks:
+        task_obj = dag_task_dict.get(t["task_id"])
+        fingerprint = compute_task_fingerprint(task_obj) if task_obj is not None else None
+        estimates.append(
+            historical_predictor.estimate_task(
+                t["task_id"],
+                t["operator_type"],
+                context={"dag_id": dag_id, "task_fingerprint": fingerprint},
+            )
+        )
 
     simulation_id = str(uuid.uuid4())
     task_responses = []

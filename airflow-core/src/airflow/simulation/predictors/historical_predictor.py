@@ -24,6 +24,7 @@ from enum import Enum
 
 from airflow.simulation.data.historical_data_extractor import (
     get_historical_runtimes,
+    get_historical_runtimes_by_fingerprint,
     get_historical_runtimes_by_operator,
 )
 from airflow.simulation.predictor_interface import (
@@ -36,6 +37,13 @@ from airflow.simulation.predictor_interface import (
 _HISTORICAL_BASE_CONFIDENCE: float = 0.7
 # Maximum confidence ceiling.
 _HISTORICAL_MAX_CONFIDENCE: float = 0.95
+# Confidence range for cross-DAG fingerprint matches — same operator + same
+# work signal (callable, bash command, SQL). Sits between exact match and the
+# operator-only fallback because the work signal is finer-grained than
+# operator class alone but still less specific than a same-(dag_id, task_id)
+# match.
+_FINGERPRINT_BASE_CONFIDENCE: float = 0.6
+_FINGERPRINT_MAX_CONFIDENCE: float = 0.85
 # Confidence range for operator-type cross-DAG estimates (lower than exact match).
 _OPERATOR_BASE_CONFIDENCE: float = 0.55
 _OPERATOR_MAX_CONFIDENCE: float = 0.75
@@ -64,7 +72,8 @@ def _percentile(data: list[float], pct: float) -> float:
 
 
 def _filter_outliers(durations: list[float], num_mad: float = 3.0) -> list[float]:
-    """Remove outliers using the median absolute deviation (MAD).
+    """
+    Remove outliers using the median absolute deviation (MAD).
 
     Unlike mean/stdev, the median and MAD are robust to outliers — a
     single extreme value cannot inflate the spread enough to hide itself.
@@ -104,7 +113,8 @@ def _compute_confidence(
     base: float = _HISTORICAL_BASE_CONFIDENCE,
     ceiling: float = _HISTORICAL_MAX_CONFIDENCE,
 ) -> float:
-    """Scale confidence based on how many data points were used.
+    """
+    Scale confidence based on how many data points were used.
 
     More data points → higher confidence, capped at *ceiling*.
 
@@ -118,7 +128,8 @@ def _compute_confidence(
 
 
 class HistoricalPredictor(PredictorInterface):
-    """Predicts task runtime from historical execution data.
+    """
+    Predicts task runtime from historical execution data.
 
     Falls back to :class:`DeterministicPredictor` when insufficient
     history is available.
@@ -180,7 +191,30 @@ class HistoricalPredictor(PredictorInterface):
                 confidence=_compute_confidence(len(durations)),
             )
 
-        # --- Level 2: operator-type match (same operator across all DAGs) ---
+        # --- Level 2: cross-DAG fingerprint match (same operator + same work
+        # signal — Python callable, bash command, SQL — across all DAGs) ---
+        fingerprint = (context or {}).get("task_fingerprint")
+        if fingerprint:
+            fp_runtimes = get_historical_runtimes_by_fingerprint(
+                fingerprint,
+                start_date=start_date,
+                limit=self.max_runs,
+            )
+            fp_durations = self._extract_durations(fp_runtimes)
+
+            if fp_durations is not None:
+                return TaskRuntimeEstimate(
+                    task_id=task_id,
+                    operator_type=operator_type,
+                    estimated_seconds=int(round(_aggregate(fp_durations, self.aggregation))),
+                    confidence=_compute_confidence(
+                        len(fp_durations),
+                        base=_FINGERPRINT_BASE_CONFIDENCE,
+                        ceiling=_FINGERPRINT_MAX_CONFIDENCE,
+                    ),
+                )
+
+        # --- Level 3: operator-type match (same operator across all DAGs) ---
         operator_runtimes = get_historical_runtimes_by_operator(
             operator_type,
             start_date=start_date,
@@ -200,11 +234,12 @@ class HistoricalPredictor(PredictorInterface):
                 ),
             )
 
-        # --- Level 3: hardcoded heuristic ---
+        # --- Level 4: hardcoded heuristic ---
         return self._fallback.estimate_task(task_id, operator_type, context)
 
     def _extract_durations(self, runtimes: list) -> list[float] | None:
-        """Extract valid durations and apply outlier filtering.
+        """
+        Extract valid durations and apply outlier filtering.
 
         Returns a list of durations if enough data points remain after
         filtering, or ``None`` to signal that the caller should try the
