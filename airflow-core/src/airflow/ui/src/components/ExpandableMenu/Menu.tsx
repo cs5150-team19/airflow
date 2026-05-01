@@ -12,7 +12,7 @@ export const SimulationMenu = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const options = getSimulationDisplayOptions(searchParams);
 
-  const toggle = (key: "sim_cp" | "sim_duration") => {
+  const toggle = (key: "sim_cp" | "sim_duration" | "sim_success") => {
     const nextSearchParams = new URLSearchParams(searchParams);
     const isEnabled = nextSearchParams.get(key) === "1";
 
@@ -67,6 +67,20 @@ export const SimulationMenu = () => {
                   <ChakraCheckbox.Label>Bottlenecks - Run Time</ChakraCheckbox.Label>
                   <Text fontSize="xs" color="gray.600" fontWeight="normal">
                     Display Tasks with the Highest Expected Run Time
+                  </Text>
+                </VStack>
+              </ChakraCheckbox.Root>
+
+              <ChakraCheckbox.Root
+                checked={options.showSuccessProbability}
+                onCheckedChange={() => toggle("sim_success")}
+              >
+                <ChakraCheckbox.HiddenInput />
+                <ChakraCheckbox.Control />
+                <VStack align="start" gap={0}>
+                  <ChakraCheckbox.Label>Success Probability</ChakraCheckbox.Label>
+                  <Text fontSize="xs" color="gray.600" fontWeight="normal">
+                    Display Per-Task Success Likelihood from Historical Runs
                   </Text>
                 </VStack>
               </ChakraCheckbox.Root>

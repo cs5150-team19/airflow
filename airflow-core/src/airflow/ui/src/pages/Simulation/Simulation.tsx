@@ -15,6 +15,7 @@ import { FiClock } from "react-icons/fi";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useDagServiceGetDagDetails } from "openapi/queries";
+import { formatProbabilityPercent } from "src/utils/simulationDisplay";
 
 interface TaskEstimate {
   task_id: string;
@@ -36,6 +37,10 @@ interface SimulationReport {
   total_estimated_seconds: number;
   critical_path: CriticalPathResult;
   predicted_outcome: string;
+  // Optional because reports persisted before the SuccessPredictor backend
+  // landed will not include them.
+  success_probability?: number;
+  task_success_probabilities?: Record<string, number>;
 }
 
 const getLatestSimulationId = (dagId: string): string | null => {
@@ -181,6 +186,16 @@ export const Simulation = () => {
                   </Text>
                 </HStack>
               </GridItem>
+              {report.success_probability !== undefined ? (
+                <GridItem>
+                  <Text fontSize="sm" fontWeight="medium" color="fg.muted">
+                    DAG Success Probability
+                  </Text>
+                  <Text fontSize="lg" fontWeight="bold" mt={1}>
+                    {formatProbabilityPercent(report.success_probability)}
+                  </Text>
+                </GridItem>
+              ) : null}
               <GridItem>
                 <Text fontSize="sm" fontWeight="medium" color="fg.muted">
                   Task Count
@@ -212,17 +227,25 @@ export const Simulation = () => {
                     <Table.ColumnHeader>Operator</Table.ColumnHeader>
                     <Table.ColumnHeader>Estimated Seconds</Table.ColumnHeader>
                     <Table.ColumnHeader>Confidence</Table.ColumnHeader>
+                    <Table.ColumnHeader>Success Probability</Table.ColumnHeader>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {report.task_estimates.map((taskEstimate) => (
-                    <Table.Row key={taskEstimate.task_id}>
-                      <Table.Cell>{taskEstimate.task_id}</Table.Cell>
-                      <Table.Cell>{taskEstimate.operator_type}</Table.Cell>
-                      <Table.Cell>{taskEstimate.estimated_seconds}</Table.Cell>
-                      <Table.Cell>{(taskEstimate.confidence * 100).toFixed(0)}%</Table.Cell>
-                    </Table.Row>
-                  ))}
+                  {report.task_estimates.map((taskEstimate) => {
+                    const probability = report.task_success_probabilities?.[taskEstimate.task_id];
+
+                    return (
+                      <Table.Row key={taskEstimate.task_id}>
+                        <Table.Cell>{taskEstimate.task_id}</Table.Cell>
+                        <Table.Cell>{taskEstimate.operator_type}</Table.Cell>
+                        <Table.Cell>{taskEstimate.estimated_seconds}</Table.Cell>
+                        <Table.Cell>{(taskEstimate.confidence * 100).toFixed(0)}%</Table.Cell>
+                        <Table.Cell>
+                          {probability === undefined ? "—" : formatProbabilityPercent(probability)}
+                        </Table.Cell>
+                      </Table.Row>
+                    );
+                  })}
                 </Table.Body>
               </Table.Root>
             </Box>

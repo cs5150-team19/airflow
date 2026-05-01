@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  formatProbabilityPercent,
   getSimulationDisplayOptions,
   getSimulationTaskDisplayMetadata,
   type SimulationReportLike,
@@ -40,12 +41,13 @@ const makeReport = (
 });
 
 describe("getSimulationDisplayOptions", () => {
-  it("returns both flags false when no params are set", () => {
+  it("returns all flags false when no params are set", () => {
     const params = new URLSearchParams();
 
     expect(getSimulationDisplayOptions(params)).toEqual({
       showCriticalPath: false,
       showDurationBottleneck: false,
+      showSuccessProbability: false,
     });
   });
 
@@ -61,13 +63,35 @@ describe("getSimulationDisplayOptions", () => {
     expect(getSimulationDisplayOptions(params).showDurationBottleneck).toBe(true);
   });
 
+  it("treats sim_success=1 as enabling success-probability overlay", () => {
+    const params = new URLSearchParams("sim_success=1");
+
+    expect(getSimulationDisplayOptions(params).showSuccessProbability).toBe(true);
+  });
+
   it("does not enable a flag for non-'1' truthy-looking values", () => {
-    const params = new URLSearchParams("sim_cp=true&sim_duration=yes");
+    const params = new URLSearchParams(
+      "sim_cp=true&sim_duration=yes&sim_success=on",
+    );
 
     expect(getSimulationDisplayOptions(params)).toEqual({
       showCriticalPath: false,
       showDurationBottleneck: false,
+      showSuccessProbability: false,
     });
+  });
+});
+
+describe("formatProbabilityPercent", () => {
+  it("formats whole numbers with one decimal place", () => {
+    expect(formatProbabilityPercent(0.75)).toBe("75.0%");
+    expect(formatProbabilityPercent(1)).toBe("100.0%");
+    expect(formatProbabilityPercent(0)).toBe("0.0%");
+  });
+
+  it("rounds to one decimal place", () => {
+    expect(formatProbabilityPercent(0.12345)).toBe("12.3%");
+    expect(formatProbabilityPercent(0.6789)).toBe("67.9%");
   });
 });
 
@@ -77,7 +101,7 @@ describe("getSimulationTaskDisplayMetadata", () => {
   it("returns no critical-path or bottleneck signals when both flags are off", () => {
     const result = getSimulationTaskDisplayMetadata(
       taskIds,
-      { showCriticalPath: false, showDurationBottleneck: false },
+      { showCriticalPath: false, showDurationBottleneck: false, showSuccessProbability: false },
       undefined,
       makeReport(),
     );
@@ -88,13 +112,14 @@ describe("getSimulationTaskDisplayMetadata", () => {
         isCriticalPath: false,
         metricLabel: undefined,
       });
+
     }
   });
 
   it("flags critical-path tasks when showCriticalPath is on", () => {
     const result = getSimulationTaskDisplayMetadata(
       taskIds,
-      { showCriticalPath: true, showDurationBottleneck: false },
+      { showCriticalPath: true, showDurationBottleneck: false, showSuccessProbability: false },
       undefined,
       makeReport(),
     );
@@ -108,7 +133,7 @@ describe("getSimulationTaskDisplayMetadata", () => {
     // Report says ["x", "a"] is the critical path, but "x" isn't in taskIds.
     const result = getSimulationTaskDisplayMetadata(
       ["a", "b"],
-      { showCriticalPath: true, showDurationBottleneck: false },
+      { showCriticalPath: true, showDurationBottleneck: false, showSuccessProbability: false },
       undefined,
       makeReport({
         critical_path: { critical_path: ["x", "a"], longest_task: "x" },
@@ -122,7 +147,7 @@ describe("getSimulationTaskDisplayMetadata", () => {
   it("marks the highest-duration task as the bottleneck when showDurationBottleneck is on", () => {
     const result = getSimulationTaskDisplayMetadata(
       taskIds,
-      { showCriticalPath: false, showDurationBottleneck: true },
+      { showCriticalPath: false, showDurationBottleneck: true, showSuccessProbability: false },
       undefined,
       makeReport(),
     );
@@ -136,13 +161,13 @@ describe("getSimulationTaskDisplayMetadata", () => {
   it("attaches a duration metric label only when bottleneck overlay is on", () => {
     const withFlag = getSimulationTaskDisplayMetadata(
       taskIds,
-      { showCriticalPath: false, showDurationBottleneck: true },
+      { showCriticalPath: false, showDurationBottleneck: true, showSuccessProbability: false },
       undefined,
       makeReport(),
     );
     const withoutFlag = getSimulationTaskDisplayMetadata(
       taskIds,
-      { showCriticalPath: false, showDurationBottleneck: false },
+      { showCriticalPath: false, showDurationBottleneck: false, showSuccessProbability: false },
       undefined,
       makeReport(),
     );
@@ -152,10 +177,64 @@ describe("getSimulationTaskDisplayMetadata", () => {
     expect(withoutFlag.a?.metricLabel).toBeUndefined();
   });
 
+  it("attaches a success probability label only when success overlay is on", () => {
+    const reportWithProbabilities = makeReport({
+      task_success_probabilities: { a: 0.9, b: 0.5, c: 0.1 },
+    });
+    const withFlag = getSimulationTaskDisplayMetadata(
+      taskIds,
+      { showCriticalPath: false, showDurationBottleneck: false, showSuccessProbability: true },
+      undefined,
+      reportWithProbabilities,
+    );
+    const withoutFlag = getSimulationTaskDisplayMetadata(
+      taskIds,
+      { showCriticalPath: false, showDurationBottleneck: false, showSuccessProbability: false },
+      undefined,
+      reportWithProbabilities,
+    );
+
+    expect(withFlag.a?.metricLabel).toBe("Success: 90.0%");
+    expect(withFlag.b?.metricLabel).toBe("Success: 50.0%");
+    expect(withFlag.c?.metricLabel).toBe("Success: 10.0%");
+    expect(withoutFlag.a?.metricLabel).toBeUndefined();
+  });
+
+  it("combines duration and success labels with a separator", () => {
+    const reportWithProbabilities = makeReport({
+      task_success_probabilities: { a: 0.9, b: 0.5, c: 0.1 },
+    });
+    const result = getSimulationTaskDisplayMetadata(
+      taskIds,
+      { showCriticalPath: false, showDurationBottleneck: true, showSuccessProbability: true },
+      undefined,
+      reportWithProbabilities,
+    );
+
+    expect(result.a?.metricLabel).toBe("Dur: 5s | Success: 90.0%");
+  });
+
+  it("omits a success label when no probability is available for the task", () => {
+    // The report knows about "a" but not "b" or "c"; only "a" should get a label.
+    const reportWithProbabilities = makeReport({
+      task_success_probabilities: { a: 0.42 },
+    });
+    const result = getSimulationTaskDisplayMetadata(
+      taskIds,
+      { showCriticalPath: false, showDurationBottleneck: false, showSuccessProbability: true },
+      undefined,
+      reportWithProbabilities,
+    );
+
+    expect(result.a?.metricLabel).toBe("Success: 42.0%");
+    expect(result.b?.metricLabel).toBeUndefined();
+    expect(result.c?.metricLabel).toBeUndefined();
+  });
+
   it("returns no bottleneck and no labels when the report is undefined", () => {
     const result = getSimulationTaskDisplayMetadata(
       taskIds,
-      { showCriticalPath: true, showDurationBottleneck: true },
+      { showCriticalPath: true, showDurationBottleneck: true, showSuccessProbability: false },
       undefined,
       undefined,
     );
@@ -166,6 +245,7 @@ describe("getSimulationTaskDisplayMetadata", () => {
         isCriticalPath: false,
         metricLabel: undefined,
       });
+
     }
   });
 
@@ -173,7 +253,7 @@ describe("getSimulationTaskDisplayMetadata", () => {
     // "ghost" is in the report but not in the taskIds list — must not appear in metadata.
     const result = getSimulationTaskDisplayMetadata(
       ["a", "b"],
-      { showCriticalPath: false, showDurationBottleneck: true },
+      { showCriticalPath: false, showDurationBottleneck: true, showSuccessProbability: false },
       undefined,
       {
         task_estimates: [
@@ -196,7 +276,7 @@ describe("getSimulationTaskDisplayMetadata", () => {
     // the max keeps it — "a" wins because it appears first in the taskIds array.
     const result = getSimulationTaskDisplayMetadata(
       ["a", "b"],
-      { showCriticalPath: false, showDurationBottleneck: true },
+      { showCriticalPath: false, showDurationBottleneck: true, showSuccessProbability: false },
       undefined,
       {
         task_estimates: [
