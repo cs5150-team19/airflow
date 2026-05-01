@@ -138,10 +138,12 @@ class TestRunSimulation(TestSimulationEndpoint):
         dag_runs_response = test_client.get(f"/dags/{DAG_ID}/dagRuns?run_type=simulation")
         assert dag_runs_response.status_code == 200
         dag_runs = dag_runs_response.json()["dag_runs"]
-        # The created run must carry both the simulation run_type and a run_id
+        # The DagRunResponse pydantic model serializes ``run_id`` as ``dag_run_id``.
+        # The created run must carry both the simulation run_type and a run id
         # suffixed with this specific simulation_id.
         assert any(
-            run["run_type"] == "simulation" and run["run_id"].endswith(simulation_id) for run in dag_runs
+            run["run_type"] == "simulation" and run["dag_run_id"].endswith(simulation_id)
+            for run in dag_runs
         )
 
 
