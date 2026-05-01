@@ -44,12 +44,8 @@ DAG_ID = "test_dag"
 TASK_ID = "test_task"
 CONTEXT = {"dag_id": DAG_ID}
 
-_PATCH_EXACT = (
-    "airflow.simulation.predictors.historical_predictor.get_historical_runtimes"
-)
-_PATCH_OPERATOR = (
-    "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_operator"
-)
+_PATCH_EXACT = "airflow.simulation.predictors.historical_predictor.get_historical_runtimes"
+_PATCH_OPERATOR = "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_operator"
 
 
 def _make_runtime(run_id: str, duration: float | None) -> HistoricalRuntime:
@@ -268,8 +264,7 @@ class TestHistoricalPredictorOperatorFallback:
         operator_runtimes = [_make_runtime(f"op_run_{i}", 25.0 + i) for i in range(5)]
         predictor = HistoricalPredictor(filter_outliers=False)
 
-        with patch(_PATCH_EXACT, return_value=[]), \
-             patch(_PATCH_OPERATOR, return_value=operator_runtimes):
+        with patch(_PATCH_EXACT, return_value=[]), patch(_PATCH_OPERATOR, return_value=operator_runtimes):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert result.estimated_seconds == 27  # median of [25,26,27,28,29]
@@ -284,8 +279,7 @@ class TestHistoricalPredictorOperatorFallback:
         with patch(_PATCH_EXACT, return_value=exact_runtimes):
             exact_result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
-        with patch(_PATCH_EXACT, return_value=[]), \
-             patch(_PATCH_OPERATOR, return_value=operator_runtimes):
+        with patch(_PATCH_EXACT, return_value=[]), patch(_PATCH_OPERATOR, return_value=operator_runtimes):
             operator_result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert exact_result.confidence > operator_result.confidence
@@ -295,8 +289,7 @@ class TestHistoricalPredictorOperatorFallback:
         operator_runtimes = [_make_runtime("op_run_0", 25.0)]
         predictor = HistoricalPredictor(min_runs=3, filter_outliers=False)
 
-        with patch(_PATCH_EXACT, return_value=[]), \
-             patch(_PATCH_OPERATOR, return_value=operator_runtimes):
+        with patch(_PATCH_EXACT, return_value=[]), patch(_PATCH_OPERATOR, return_value=operator_runtimes):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert result.estimated_seconds == _OPERATOR_RUNTIME_SECONDS[OperatorType.PYTHON]
@@ -304,17 +297,13 @@ class TestHistoricalPredictorOperatorFallback:
 
     def test_operator_fallback_with_outlier_filtering(self):
         """Outlier filtering applies to operator-type data too."""
-        operator_runtimes = [
-            _make_runtime(f"op_run_{i}", d)
-            for i, d in enumerate([20, 21, 22, 23, 20000])
-        ]
+        operator_runtimes = [_make_runtime(f"op_run_{i}", d) for i, d in enumerate([20, 21, 22, 23, 20000])]
         predictor = HistoricalPredictor(
             aggregation=AggregationMethod.MEAN,
             filter_outliers=True,
         )
 
-        with patch(_PATCH_EXACT, return_value=[]), \
-             patch(_PATCH_OPERATOR, return_value=operator_runtimes):
+        with patch(_PATCH_EXACT, return_value=[]), patch(_PATCH_OPERATOR, return_value=operator_runtimes):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert result.estimated_seconds < 30
@@ -325,8 +314,10 @@ class TestHistoricalPredictorOperatorFallback:
         operator_runtimes = [_make_runtime(f"op_run_{i}", 99.0) for i in range(5)]
         predictor = HistoricalPredictor(filter_outliers=False)
 
-        with patch(_PATCH_EXACT, return_value=exact_runtimes), \
-             patch(_PATCH_OPERATOR, return_value=operator_runtimes) as mock_op:
+        with (
+            patch(_PATCH_EXACT, return_value=exact_runtimes),
+            patch(_PATCH_OPERATOR, return_value=operator_runtimes) as mock_op,
+        ):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert result.estimated_seconds == 10
@@ -345,8 +336,7 @@ class TestHistoricalPredictorFullFallback:
         """No exact match, no operator data → DeterministicPredictor."""
         predictor = HistoricalPredictor()
 
-        with patch(_PATCH_EXACT, return_value=[]), \
-             patch(_PATCH_OPERATOR, return_value=[]):
+        with patch(_PATCH_EXACT, return_value=[]), patch(_PATCH_OPERATOR, return_value=[]):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert result.estimated_seconds == _OPERATOR_RUNTIME_SECONDS[OperatorType.PYTHON]
@@ -357,8 +347,10 @@ class TestHistoricalPredictorFullFallback:
         none_runtimes = [_make_runtime(f"run_{i}", None) for i in range(5)]
         predictor = HistoricalPredictor()
 
-        with patch(_PATCH_EXACT, return_value=none_runtimes), \
-             patch(_PATCH_OPERATOR, return_value=none_runtimes):
+        with (
+            patch(_PATCH_EXACT, return_value=none_runtimes),
+            patch(_PATCH_OPERATOR, return_value=none_runtimes),
+        ):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert result.confidence == _DETERMINISTIC_CONFIDENCE
@@ -369,8 +361,10 @@ class TestHistoricalPredictorFullFallback:
         operator_runtimes = [_make_runtime(f"op_run_{i}", 50.0) for i in range(5)]
         predictor = HistoricalPredictor(min_runs=3, filter_outliers=False)
 
-        with patch(_PATCH_EXACT, return_value=exact_runtimes), \
-             patch(_PATCH_OPERATOR, return_value=operator_runtimes):
+        with (
+            patch(_PATCH_EXACT, return_value=exact_runtimes),
+            patch(_PATCH_OPERATOR, return_value=operator_runtimes),
+        ):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         assert result.estimated_seconds == 50
@@ -382,8 +376,10 @@ class TestHistoricalPredictorFullFallback:
         operator_runtimes = [_make_runtime(f"op_run_{i}", 50.0) for i in range(5)]
         predictor = HistoricalPredictor(min_runs=10, filter_outliers=False)
 
-        with patch(_PATCH_EXACT, return_value=exact_runtimes), \
-             patch(_PATCH_OPERATOR, return_value=operator_runtimes):
+        with (
+            patch(_PATCH_EXACT, return_value=exact_runtimes),
+            patch(_PATCH_OPERATOR, return_value=operator_runtimes),
+        ):
             result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
 
         # Both have 5 runs < min_runs=10, falls to heuristic

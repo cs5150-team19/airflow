@@ -18,12 +18,11 @@ from __future__ import annotations
 
 import pytest
 
+from airflow._shared.timezones.timezone import datetime
 from airflow.models import DagRun, TaskInstance
 from airflow.models.dag_version import DagVersion
 from airflow.utils.state import DagRunState, TaskInstanceState
 from airflow.utils.types import DagRunType
-
-from airflow._shared.timezones.timezone import datetime
 
 from tests_common.test_utils.db import clear_db_runs
 
@@ -139,8 +138,13 @@ class TestRunSimulation(TestSimulationEndpoint):
         dag_runs_response = test_client.get(f"/dags/{DAG_ID}/dagRuns?run_type=simulation")
         assert dag_runs_response.status_code == 200
         dag_runs = dag_runs_response.json()["dag_runs"]
-        assert any(run["run_id"].startswith("simulation__") for run in dag_runs)
-        assert any(run["run_type"] == "simulation" for run in dag_runs)
+        # The DagRunResponse pydantic model serializes ``run_id`` as ``dag_run_id``.
+        # The created run must carry both the simulation run_type and a run id
+        # suffixed with this specific simulation_id.
+        assert any(
+            run["run_type"] == "simulation" and run["dag_run_id"].endswith(simulation_id)
+            for run in dag_runs
+        )
 
 
 class TestGetSimulation(TestSimulationEndpoint):
@@ -174,3 +178,83 @@ class TestGetSimulation(TestSimulationEndpoint):
         get_data = get_response.json()
 
         assert post_data == get_data
+
+
+class TestResultCachePersistence(TestSimulationEndpoint):
+    """Pin the in-memory result-cache contract.
+
+    Simulation results are stored in a module-level dict in
+    ``airflow.api_fastapi.core_api.routes.public.simulation``. These tests
+    ensure that:
+
+    1. Multiple simulations on the same DAG do not overwrite each other —
+       a consequence of UUID4-keyed entries.
+    2. A simulation_id is scoped to its originating DAG and cannot be
+       fetched through another DAG's URL path.
+    """
+
+    def test_two_consecutive_simulations_are_both_retrievable(self, test_client, session):
+        self.create_dag_run_with_tasks(session)
+
+        first = test_client.post(f"/dags/{DAG_ID}/simulate")
+        second = test_client.post(f"/dags/{DAG_ID}/simulate")
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_id = first.json()["simulation_id"]
+        second_id = second.json()["simulation_id"]
+        assert first_id != second_id
+
+        first_fetch = test_client.get(f"/dags/{DAG_ID}/simulate/{first_id}")
+        second_fetch = test_client.get(f"/dags/{DAG_ID}/simulate/{second_id}")
+        assert first_fetch.status_code == 200
+        assert second_fetch.status_code == 200
+        assert first_fetch.json()["simulation_id"] == first_id
+        assert second_fetch.json()["simulation_id"] == second_id
+
+    def test_simulation_id_is_scoped_to_originating_dag(self, test_client, session):
+        # POST on DAG A, then try to fetch the simulation through DAG B's path.
+        # Even if the cache has the entry, the route must reject the cross-DAG read.
+        self.create_dag_run_with_tasks(session)
+
+        post_response = test_client.post(f"/dags/{DAG_ID}/simulate")
+        simulation_id = post_response.json()["simulation_id"]
+
+        cross_dag_response = test_client.get(f"/dags/some_other_dag/simulate/{simulation_id}")
+
+        assert cross_dag_response.status_code == 404
+
+
+class TestSimulationAccessControl(TestSimulationEndpoint):
+    """Pin the auth posture of /simulate.
+
+    The current route is gated by ``requires_access_dag(method="GET", ...)``
+    even though POST creates a real DagRun. These tests pin the *current*
+    behavior so that any tightening of permissions (e.g. requiring write
+    access on POST) is a deliberate change covered by an updated test, not
+    a silent regression.
+    """
+
+    def test_post_returns_401_for_unauthenticated_client(self, unauthenticated_test_client, session):
+        self.create_dag_run_with_tasks(session)
+
+        response = unauthenticated_test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        assert response.status_code == 401
+
+    def test_post_returns_403_for_unauthorized_client(self, unauthorized_test_client, session):
+        self.create_dag_run_with_tasks(session)
+
+        response = unauthorized_test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        assert response.status_code == 403
+
+    def test_get_returns_401_for_unauthenticated_client(self, unauthenticated_test_client):
+        response = unauthenticated_test_client.get(f"/dags/{DAG_ID}/simulate/any-id")
+
+        assert response.status_code == 401
+
+    def test_get_returns_403_for_unauthorized_client(self, unauthorized_test_client):
+        response = unauthorized_test_client.get(f"/dags/{DAG_ID}/simulate/any-id")
+
+        assert response.status_code == 403

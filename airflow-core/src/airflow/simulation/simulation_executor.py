@@ -42,7 +42,7 @@ class SimulationExecutor(BaseExecutor):
         team_name: str | None = None,
     ) -> None:
         self.predictor = predictor or DeterministicPredictor()
-        
+
         super().__init__(parallelism=parallelism, team_name=team_name)
 
     def _process_workloads(self, workload_list: Sequence[workloads.All]):

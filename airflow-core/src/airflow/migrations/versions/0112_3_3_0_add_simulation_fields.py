@@ -20,7 +20,7 @@
 Add simulation fields to task_instance and dag_run.
 
 Revision ID: 49ed3350068d
-Revises: 9fabad868fdb
+Revises: fde9ed84d07b
 Create Date: 2026-04-24 00:00:00.000000
 
 """
@@ -31,7 +31,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "49ed3350068d"
-down_revision = "9fabad868fdb"
+down_revision = "fde9ed84d07b"
 branch_labels = None
 depends_on = None
 airflow_version = "3.3.0"
