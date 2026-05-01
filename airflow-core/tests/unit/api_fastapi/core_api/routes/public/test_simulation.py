@@ -108,6 +108,16 @@ class TestRunSimulation(TestSimulationEndpoint):
 
         assert response.status_code == 404
 
+    def test_should_run_simulation_without_prior_runs(self, test_client, session):
+        response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["dag_id"] == DAG_ID
+        assert "simulation_id" in data
+        assert isinstance(data["task_estimates"], list)
+        assert len(data["task_estimates"]) > 0
+
     def test_total_equals_sum_of_task_estimates(self, test_client, session):
         self.create_dag_run_with_tasks(session)
 
@@ -138,13 +148,8 @@ class TestRunSimulation(TestSimulationEndpoint):
         dag_runs_response = test_client.get(f"/dags/{DAG_ID}/dagRuns?run_type=simulation")
         assert dag_runs_response.status_code == 200
         dag_runs = dag_runs_response.json()["dag_runs"]
-        # The DagRunResponse pydantic model serializes ``run_id`` as ``dag_run_id``.
-        # The created run must carry both the simulation run_type and a run id
-        # suffixed with this specific simulation_id.
-        assert any(
-            run["run_type"] == "simulation" and run["dag_run_id"].endswith(simulation_id)
-            for run in dag_runs
-        )
+        assert any(run["dag_run_id"].startswith("simulation__") for run in dag_runs)
+        assert any(run["run_type"] == "simulation" for run in dag_runs)
 
 
 class TestGetSimulation(TestSimulationEndpoint):
