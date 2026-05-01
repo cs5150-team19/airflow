@@ -47,16 +47,27 @@ simulation_router = AirflowRouter(tags=["Simulation"], prefix="/dags/{dag_id}")
 _simulation_results: dict[str, SimulationResponse] = {}
 
 
-def _get_dag_for_dag_run(dag_run: DagRun, dag_id: str, session: SessionDep):
-    if dag_run.dag is not None:
-        return dag_run.dag
-
+def _get_serialized_dag(dag_id: str, session: SessionDep):
     dag = SerializedDagModel.get_dag(dag_id, session=session)
     if dag is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"No serialized DAG found for dag_id: `{dag_id}`",
         )
+    return dag
+
+
+def _get_dag_for_dag_run(dag_run: DagRun, dag_id: str, session: SessionDep):
+    if dag_run.dag is not None:
+        return dag_run.dag
+
+    try:
+        dag = dag_run.get_dag()
+    except AirflowException:
+        dag = None
+
+    if dag is None:
+        dag = _get_serialized_dag(dag_id, session)
 
     dag_run.dag = dag
     return dag
@@ -73,25 +84,43 @@ def run_simulation(
 ) -> SimulationResponse:
     """Run a simulation for all tasks in the most recent DAG run."""
     dag_run = session.scalar(
-        select(DagRun).where(DagRun.dag_id == dag_id).order_by(DagRun.start_date.desc()).limit(1)
+        select(DagRun)
+        .where(DagRun.dag_id == dag_id)
+        .order_by(DagRun.start_date.desc())
+        .limit(1)
     )
-    if dag_run is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            f"No DAG runs found for dag_id: `{dag_id}`",
-        )
 
-    task_instances = session.scalars(select(TI).where(TI.dag_id == dag_id, TI.run_id == dag_run.run_id)).all()
+    if dag_run is not None:
+        task_instances = session.scalars(
+            select(TI).where(TI.dag_id == dag_id, TI.run_id == dag_run.run_id)
+        ).all()
+    else:
+        task_instances = []
 
-    if not task_instances:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            f"No task instances found for dag_id: `{dag_id}`, run_id: `{dag_run.run_id}`",
-        )
+    if task_instances:
+        tasks = [
+            {"task_id": ti.task_id, "operator_type": ti.operator or "Unknown"}
+            for ti in task_instances
+        ]
+        dag = _get_dag_for_dag_run(dag_run, dag_id, session)
+    else:
+        dag = _get_serialized_dag(dag_id, session)
+        tasks = [
+            {
+                "task_id": task.task_id,
+                "operator_type": getattr(task, "operator", None)
+                or getattr(task, "task_type", None)
+                or "Unknown",
+            }
+            for task in dag.tasks
+        ]
+        if not tasks:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                f"No tasks found for dag_id: `{dag_id}`",
+            )
 
     historical_predictor = HistoricalPredictor()
-    tasks = [{"task_id": ti.task_id, "operator_type": ti.operator or "Unknown"} for ti in task_instances]
-
     estimates = []
     total_runtime = 0
     for t in tasks:
@@ -112,11 +141,6 @@ def run_simulation(
         )
         for te in estimates
     ]
-
-    try:
-        dag = dag_run.get_dag()
-    except AirflowException:
-        dag = _get_dag_for_dag_run(dag_run, dag_id, session)
 
     critical_path_response = get_critical_path(dag, task_responses)
 
