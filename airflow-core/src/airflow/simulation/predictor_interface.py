@@ -31,7 +31,7 @@ class OperatorType(str, Enum):
     UNKNOWN = "Unknown"
 
 
-_OPERATOR_RUNTIME_SECONDS: dict[str, int] = {
+_OPERATOR_RUNTIME_SECONDS: dict[str, float] = {
     OperatorType.PYTHON: 30,
     OperatorType.BASH: 10,
     OperatorType.MYSQL: 60,
@@ -54,7 +54,7 @@ class PredictedOutcome(str, Enum):
 class TaskRuntimeEstimate:
     task_id: str
     operator_type: str
-    estimated_seconds: int
+    estimated_seconds: float
     confidence: float  # 0.0 to 1.0
 
 
@@ -62,7 +62,7 @@ class TaskRuntimeEstimate:
 class SimulationEstimate:
     dag_id: str
     task_estimates: list[TaskRuntimeEstimate]
-    total_task_seconds: int
+    total_task_seconds: float
     predicted_outcome: PredictedOutcome
 
 

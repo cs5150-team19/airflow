@@ -24,7 +24,7 @@ class TaskSimulationResponse(BaseModel):
 
     task_id: str
     operator_type: str
-    estimated_seconds: int
+    estimated_seconds: float
     confidence: float
     # Counts of historical (dag_id, task_id) entries the predictors used —
     # same lookback window as the SuccessPredictor. ``historical_total`` is the
@@ -52,7 +52,7 @@ class SimulationResponse(BaseModel):
     simulation_id: str
     dag_id: str
     task_estimates: list[TaskSimulationResponse]
-    total_estimated_seconds: int
+    total_estimated_seconds: float
     critical_path: CriticalPathResult
     predicted_outcome: str
     # Probability in [0.0, 1.0] that every task in the DAG would succeed,

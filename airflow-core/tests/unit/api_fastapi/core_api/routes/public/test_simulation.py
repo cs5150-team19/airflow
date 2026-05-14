@@ -16,11 +16,14 @@
 # under the License.
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from airflow._shared.timezones.timezone import datetime
 from airflow.models import DagRun, TaskInstance
 from airflow.models.dag_version import DagVersion
+from airflow.simulation.predictor_interface import TaskRuntimeEstimate
 from airflow.utils.state import DagRunState, TaskInstanceState
 from airflow.utils.types import DagRunType
 
@@ -128,10 +131,33 @@ class TestRunSimulation(TestSimulationEndpoint):
 
         data = response.json()
         estimates_by_id = {te["task_id"]: te["estimated_seconds"] for te in data["task_estimates"]}
-        expected = sum(
-            estimates_by_id[task_id] for task_id in data["critical_path"]["critical_path"]
-        )
+        expected = sum(estimates_by_id[task_id] for task_id in data["critical_path"]["critical_path"])
         assert data["total_estimated_seconds"] == expected
+
+    def test_should_return_fractional_estimated_seconds(self, test_client, session):
+        self.create_dag_run_with_tasks(session)
+
+        def estimate_fractional_task(task_id, operator_type, context):
+            return TaskRuntimeEstimate(
+                task_id=task_id,
+                operator_type=operator_type,
+                estimated_seconds=0.25,
+                confidence=0.7,
+            )
+
+        with patch(
+            "airflow.api_fastapi.core_api.routes.public.simulation.HistoricalPredictor.estimate_task",
+            side_effect=estimate_fractional_task,
+        ) as estimate_task:
+            response = test_client.post(f"/dags/{DAG_ID}/simulate")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert estimate_task.call_count == len(data["task_estimates"])
+        assert all(task["estimated_seconds"] == 0.25 for task in data["task_estimates"])
+        assert data["total_estimated_seconds"] == pytest.approx(
+            sum(0.25 for _ in data["critical_path"]["critical_path"])
+        )
 
     def test_should_load_serialized_dag_when_dag_run_dag_is_missing(self, test_client, session):
         self.create_dag_run_with_tasks(session)
@@ -289,13 +315,16 @@ class TestSuccessPredictorIntegration(TestSimulationEndpoint):
         """
         from datetime import timedelta
 
+        from airflow._shared.timezones import timezone
+
+        history_start = timezone.utcnow() - timedelta(days=len(states))
         dag = self.dagbag.get_latest_version_of_dag(dag_id, session=session)
         dag_version = DagVersion.get_latest_version(dag.dag_id, session=session)
         source_task = next(t for t in dag.tasks if t.task_id == task_id)
 
         for index, state in enumerate(states):
             run_id = f"HISTORY_{task_id}_{index}"
-            run_date = DEFAULT_TIME + timedelta(days=index)
+            run_date = history_start + timedelta(days=index)
             dr_state = (
                 DagRunState(dag_run_states[index])
                 if dag_run_states is not None
@@ -307,7 +336,9 @@ class TestSuccessPredictorIntegration(TestSimulationEndpoint):
                 logical_date=run_date,
                 run_type=DagRunType.MANUAL,
                 state=dr_state,
+                start_date=run_date,
             )
+            dr.end_date = run_date + timedelta(seconds=10)
             session.add(dr)
             session.flush()
 
@@ -375,9 +406,7 @@ class TestSuccessPredictorIntegration(TestSimulationEndpoint):
                 continue
             assert prob == pytest.approx(0.5)
 
-    def test_dag_probability_uses_dag_run_history_not_task_multiplication(
-        self, test_client, session
-    ):
+    def test_dag_probability_uses_dag_run_history_not_task_multiplication(self, test_client, session):
         # Regression test: the old implementation multiplied per-task
         # probabilities, so a DAG with N tasks and no history would score
         # ``0.5^N`` and predict failure. The fix uses DagRun history
@@ -433,9 +462,7 @@ class TestSuccessPredictorIntegration(TestSimulationEndpoint):
             assert te["historical_success"] == 0
             assert te["historical_failed"] == 0
 
-    def test_branching_dag_with_skipped_tasks_does_not_predict_failure(
-        self, test_client, session
-    ):
+    def test_branching_dag_with_skipped_tasks_does_not_predict_failure(self, test_client, session):
         # Bug regression: example_branch_operator_decorator (and any branching
         # DAG) routinely produces ``state="skipped"`` for branched-around
         # tasks. The old code treated skipped as failure and multiplied

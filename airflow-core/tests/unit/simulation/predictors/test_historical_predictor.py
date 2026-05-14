@@ -45,9 +45,7 @@ TASK_ID = "test_task"
 CONTEXT = {"dag_id": DAG_ID}
 
 _PATCH_EXACT = "airflow.simulation.predictors.historical_predictor.get_historical_runtimes"
-_PATCH_OPERATOR = (
-    "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_operator"
-)
+_PATCH_OPERATOR = "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_operator"
 _PATCH_FINGERPRINT = (
     "airflow.simulation.predictors.historical_predictor.get_historical_runtimes_by_fingerprint"
 )
@@ -164,6 +162,16 @@ class TestHistoricalPredictorExactMatch:
         assert result.estimated_seconds == 12  # median of [10,11,12,13,14]
         assert result.confidence >= 0.7
 
+    def test_subsecond_history_preserves_fractional_seconds(self):
+        """Sub-second historical runtimes are not rounded down to zero."""
+        runtimes = [_make_runtime(f"run_{i}", duration) for i, duration in enumerate([0.1, 0.2, 0.3])]
+        predictor = HistoricalPredictor(filter_outliers=False)
+
+        with patch(_PATCH_EXACT, return_value=runtimes):
+            result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, CONTEXT)
+
+        assert result.estimated_seconds == pytest.approx(0.2)
+
     def test_null_durations_ignored(self):
         """Runs with None duration are excluded from aggregation."""
         runtimes = [
@@ -180,12 +188,12 @@ class TestHistoricalPredictorExactMatch:
         assert result.estimated_seconds == 20  # median of [10, 20, 30]
 
     @pytest.mark.parametrize(
-        "method, expected",
+        ("method", "expected"),
         [
             (AggregationMethod.MEDIAN, 30),
             (AggregationMethod.MEAN, 30),
-            (AggregationMethod.P90, 46),
-            (AggregationMethod.P95, 48),
+            (AggregationMethod.P90, 46.0),
+            (AggregationMethod.P95, 48.0),
         ],
     )
     def test_aggregation_methods(self, method, expected):
@@ -414,9 +422,7 @@ class TestHistoricalPredictorFingerprintFallback:
             patch(_PATCH_FINGERPRINT, return_value=fp_runtimes) as fp_mock,
             patch(_PATCH_OPERATOR, return_value=[]) as op_mock,
         ):
-            result = predictor.estimate_task(
-                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
-            )
+            result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT)
 
         # Result reflects fingerprint data (median=100), not exact (10).
         assert result.estimated_seconds == 100
@@ -474,9 +480,7 @@ class TestHistoricalPredictorFingerprintFallback:
             patch(_PATCH_FINGERPRINT, return_value=[_make_runtime("only", 100.0)]),
             patch(_PATCH_OPERATOR, return_value=operator_runtimes),
         ):
-            result = predictor.estimate_task(
-                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
-            )
+            result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT)
 
         # Result should reflect the operator-level estimate (50), not the
         # singleton fingerprint match (100).
@@ -494,25 +498,19 @@ class TestHistoricalPredictorFingerprintFallback:
             patch(_PATCH_FINGERPRINT, return_value=[]),
             patch(_PATCH_OPERATOR, return_value=[]),
         ):
-            exact_result = predictor.estimate_task(
-                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
-            )
+            exact_result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT)
         with (
             patch(_PATCH_EXACT, return_value=[]),
             patch(_PATCH_FINGERPRINT, return_value=runtimes),
             patch(_PATCH_OPERATOR, return_value=[]),
         ):
-            fp_result = predictor.estimate_task(
-                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
-            )
+            fp_result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT)
         with (
             patch(_PATCH_EXACT, return_value=[]),
             patch(_PATCH_FINGERPRINT, return_value=[]),
             patch(_PATCH_OPERATOR, return_value=runtimes),
         ):
-            op_result = predictor.estimate_task(
-                TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT
-            )
+            op_result = predictor.estimate_task(TASK_ID, OperatorType.PYTHON, _FINGERPRINT_CONTEXT)
 
         assert exact_result.confidence > fp_result.confidence > op_result.confidence
         assert op_result.confidence > _DETERMINISTIC_CONFIDENCE

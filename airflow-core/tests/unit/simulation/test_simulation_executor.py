@@ -42,7 +42,7 @@ def _fake_estimate() -> TaskRuntimeEstimate:
     return TaskRuntimeEstimate(
         task_id="t",
         operator_type="PythonOperator",
-        estimated_seconds=42,
+        estimated_seconds=42.25,
         confidence=0.5,
     )
 
@@ -142,7 +142,7 @@ class TestProcessTaskWorkload:
         info = executor.success.call_args.kwargs["info"]
         assert info == {
             "simulated": True,
-            "estimated_runtime": 42,
+            "estimated_runtime": 42.25,
             "confidence": 0.5,
             "predicted_outcome": "success",
         }
@@ -187,7 +187,7 @@ class TestProcessTaskWorkload:
         call = executor.log_task_event.call_args
         assert call.kwargs["event"] == "simulation"
         assert call.kwargs["ti_key"] == workload.ti.key
-        assert "estimated_runtime=42s" in call.kwargs["extra"]
+        assert "estimated_runtime=42.25s" in call.kwargs["extra"]
         assert "confidence=0.5" in call.kwargs["extra"]
 
     def test_predictor_called_with_task_metadata(self):
