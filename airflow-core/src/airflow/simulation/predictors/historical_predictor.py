@@ -187,7 +187,7 @@ class HistoricalPredictor(PredictorInterface):
             return TaskRuntimeEstimate(
                 task_id=task_id,
                 operator_type=operator_type,
-                estimated_seconds=_aggregate(durations, self.aggregation),
+                estimated_seconds=round(_aggregate(durations, self.aggregation),3),
                 confidence=_compute_confidence(len(durations)),
             )
 
@@ -206,7 +206,7 @@ class HistoricalPredictor(PredictorInterface):
                 return TaskRuntimeEstimate(
                     task_id=task_id,
                     operator_type=operator_type,
-                    estimated_seconds=_aggregate(fp_durations, self.aggregation),
+                    estimated_seconds=round(_aggregate(fp_durations, self.aggregation),3),
                     confidence=_compute_confidence(
                         len(fp_durations),
                         base=_FINGERPRINT_BASE_CONFIDENCE,
@@ -226,7 +226,7 @@ class HistoricalPredictor(PredictorInterface):
             return TaskRuntimeEstimate(
                 task_id=task_id,
                 operator_type=operator_type,
-                estimated_seconds=_aggregate(operator_durations, self.aggregation),
+                estimated_seconds=round(_aggregate(operator_durations, self.aggregation),3),
                 confidence=_compute_confidence(
                     len(operator_durations),
                     base=_OPERATOR_BASE_CONFIDENCE,
