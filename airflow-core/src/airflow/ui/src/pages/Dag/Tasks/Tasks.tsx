@@ -16,11 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, Link } from "@chakra-ui/react";
+import { Box, Link} from "@chakra-ui/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useLocation } from "react-router-dom";
 import { Link as RouterLink } from "react-router-dom";
 
 import { useTaskServiceGetTasks } from "openapi/queries";
@@ -36,19 +36,26 @@ type TaskRow = { row: { original: TaskResponse } };
 const createColumns = ({
   dagId,
   translate,
+  isSimulating,
 }: {
   dagId: string;
   translate: TFunction;
+  isSimulating: boolean;
 }): Array<ColumnDef<TaskResponse>> => [
   {
     accessorKey: "task_display_name",
-    cell: ({ row: { original } }: TaskRow) => (
-      <Link asChild color="fg.info" fontWeight="bold">
-        <RouterLink to={`/dags/${dagId}/tasks/${original.task_id}`}>
-          <TruncatedText text={original.task_display_name ?? original.task_id ?? ""} />
-        </RouterLink>
-      </Link>
-    ),
+    cell: ({ row: { original } }: TaskRow) => {
+      const taskPath = isSimulating
+        ? `/dags/${dagId}/simulation/tasks/${original.task_id}`
+        : `/dags/${dagId}/tasks/${original.task_id}`;
+      return (
+        <Link asChild color="fg.info" fontWeight="bold">
+          <RouterLink to={taskPath}>
+            <TruncatedText text={original.task_display_name ?? original.task_id ?? ""} />
+          </RouterLink>
+        </Link>
+      );
+    },
     enableSorting: false,
     header: translate("common:taskId"),
   },
@@ -84,9 +91,12 @@ export const Tasks = () => {
   const selectedMapped = searchParams.get(MAPPED) ?? undefined;
   const namePattern = searchParams.get(NAME_PATTERN) ?? undefined;
 
+  const location = useLocation();
+  const isSimulating = location.pathname.includes("/simulation");
+
   const { t: translate } = useTranslation(["tasks", "common"]);
 
-  const columns = createColumns({ dagId, translate });
+  const columns = createColumns({ dagId, translate, isSimulating });
 
   const {
     data,

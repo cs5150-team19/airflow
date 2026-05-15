@@ -44,6 +44,7 @@ from airflow.api_fastapi.core_api.routes.public.monitor import monitor_router
 from airflow.api_fastapi.core_api.routes.public.plugins import plugins_router
 from airflow.api_fastapi.core_api.routes.public.pools import pools_router
 from airflow.api_fastapi.core_api.routes.public.providers import providers_router
+from airflow.api_fastapi.core_api.routes.public.simulation import simulation_router
 from airflow.api_fastapi.core_api.routes.public.task_instances import task_instances_router
 from airflow.api_fastapi.core_api.routes.public.tasks import tasks_router
 from airflow.api_fastapi.core_api.routes.public.variables import variables_router
@@ -83,6 +84,7 @@ authenticated_router.include_router(dag_parsing_router)
 authenticated_router.include_router(dag_tags_router)
 authenticated_router.include_router(dag_versions_router)
 authenticated_router.include_router(task_instances_hitl_router)
+authenticated_router.include_router(simulation_router)
 
 
 # Include authenticated router in public router

@@ -21,7 +21,7 @@ import type { DagRunType } from "openapi-gen/requests/types.gen";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FiPlay } from "react-icons/fi";
-import { useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { useDagRunServiceGetDagRun } from "openapi/queries";
 import { Menu } from "src/components/ui";
@@ -36,6 +36,7 @@ type TriggerDAGButtonProps = {
   readonly isPaused: boolean;
   readonly variant?: "ghost" | "outline";
   readonly withText?: boolean;
+  readonly label?: string;
 };
 
 export const TriggerDAGButton = ({
@@ -45,12 +46,15 @@ export const TriggerDAGButton = ({
   isPaused,
   variant = "ghost",
   withText = false,
+  label,
 }: TriggerDAGButtonProps) => {
   const isManualRunDenied =
     allowedRunTypes !== null && allowedRunTypes !== undefined && !allowedRunTypes.includes("manual");
   const { onClose, onOpen, open } = useDisclosure();
   const { t: translate } = useTranslation("components");
   const { runId } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [prefillConfig, setPrefillConfig] = useState<
     | {
         conf: Record<string, unknown> | undefined;
@@ -59,6 +63,8 @@ export const TriggerDAGButton = ({
       }
     | undefined
   >(undefined);
+
+  const isSimulating = location.pathname.includes("/simulation");
 
   // Check if there's a selected DAG Run
   const { data: selectedDagRun } = useDagRunServiceGetDagRun(
@@ -84,6 +90,35 @@ export const TriggerDAGButton = ({
   const handleNormalTrigger = () => {
     setPrefillConfig(undefined);
     onOpen();
+  };
+
+  const handleSimulationTrigger = async () => {
+    if (!dagId) {
+      return;
+    }
+    const response = await fetch(`/api/v2/dags/${dagId}/simulate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    if (!response.ok) {
+      return;
+    }
+    const data = (await response.json()) as { simulation_id: string };
+    globalThis.localStorage.setItem(
+      `airflow.latestSimulation.${dagId}`,
+      JSON.stringify({
+        simulationId: data.simulation_id,
+        triggeredAt: new Date().toISOString(),
+      }),
+    );
+    globalThis.dispatchEvent(
+      new CustomEvent("airflow:simulation-triggered", {
+        detail: { dagId, simulationId: data.simulation_id },
+      }),
+    );
+    void navigate(`/dags/${dagId}/simulation?simulation_id=${data.simulation_id}`);
   };
 
   const handleModalClose = () => {
@@ -112,7 +147,7 @@ export const TriggerDAGButton = ({
             </Menu.Trigger>
           </Tooltip>
           <Menu.Content>
-            <Menu.Item onClick={handleNormalTrigger} value="trigger">
+            <Menu.Item onClick={isSimulating ? handleSimulationTrigger : handleNormalTrigger} value="trigger">
               {translate("triggerDag.button")}
             </Menu.Item>
             <Menu.Item onClick={handleTriggerWithConfig} value="triggerWithConfig">
@@ -146,12 +181,12 @@ export const TriggerDAGButton = ({
             colorPalette="brand"
             data-testid="trigger-dag-button"
             disabled={isManualRunDenied}
-            onClick={handleNormalTrigger}
+            onClick={isSimulating ? handleSimulationTrigger : handleNormalTrigger}
             size="md"
             variant={variant}
           >
             <FiPlay />
-            {translate("triggerDag.button")}
+            {label ?? translate("triggerDag.button")}
           </Button>
         ) : (
           <IconButton
@@ -159,11 +194,12 @@ export const TriggerDAGButton = ({
             colorPalette="brand"
             data-testid="trigger-dag-button"
             disabled={isManualRunDenied}
-            onClick={onOpen}
+            onClick={isSimulating ? handleSimulationTrigger : onOpen}
             size="md"
             variant={variant}
           >
             <FiPlay />
+            {label ?? translate("triggerDag.button")}
           </IconButton>
         )}
       </Tooltip>

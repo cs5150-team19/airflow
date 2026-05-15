@@ -184,7 +184,8 @@
     "asset_triggered": "Asset Triggered",
     "backfill": "Backfill",
     "manual": "Manual",
-    "scheduled": "Scheduled"
+    "scheduled": "Scheduled",
+    "simulation": "Simulation"
   },
   "scroll": {
     "direction": {

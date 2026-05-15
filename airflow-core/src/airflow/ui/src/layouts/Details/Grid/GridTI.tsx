@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Badge, Box, Flex } from "@chakra-ui/react";
+import { Badge, Box, Flex, Text } from "@chakra-ui/react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import type { LightGridTaskInstanceSummary } from "openapi/requests/types.gen";
@@ -30,13 +30,29 @@ type Props = {
   readonly instance: LightGridTaskInstanceSummary;
   readonly isGroup?: boolean;
   readonly isMapped?: boolean | null;
+  readonly isBottleneck?: boolean;
+  readonly isCriticalPath?: boolean;
   readonly label: string;
   readonly onClick?: () => void;
   readonly runId: string;
+  readonly simulationMetricLabel?: string;
   readonly taskId: string;
+  readonly isSimulating?: boolean;
 };
 
-export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, taskId }: Props) => {
+export const GridTI = ({
+  dagId,
+  instance,
+  isBottleneck = false,
+  isCriticalPath = false,
+  isGroup,
+  isMapped,
+  onClick,
+  runId,
+  simulationMetricLabel,
+  taskId,
+  isSimulating = false,
+}: Props) => {
   const { hoveredTaskId, setHoveredTaskId } = useHover();
   const { groupId: selectedGroupId, taskId: selectedTaskId } = useParams();
   const location = useLocation();
@@ -50,6 +66,7 @@ export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, tas
     isMapped: Boolean(isMapped),
     runId,
     taskId,
+    isSimulating
   });
 
   const handleMouseEnter = () => setHoveredTaskId(taskId);
@@ -69,6 +86,8 @@ export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, tas
     <Flex
       alignItems="center"
       bg={isSelected ? "brand.emphasized" : isHovered ? "brand.muted" : undefined}
+      borderColor={isCriticalPath ? "red.500" : isBottleneck ? "orange.500" : undefined}
+      borderWidth={isCriticalPath || isBottleneck ? 1 : 0}
       height="20px"
       id={`task-${taskId.replaceAll(".", "-")}`}
       justifyContent="center"
@@ -80,13 +99,8 @@ export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, tas
       py={0}
       transition="background-color 0.2s"
     >
-      <TaskInstanceTooltip
-        openDelay={500}
-        positioning={{ placement: "bottom" }}
-        runId={runId}
-        taskInstance={instance}
-      >
-        <Box as="span" display="inline-block">
+      <TaskInstanceTooltip openDelay={500} positioning={{ placement: "bottom" }} taskInstance={instance}>
+        <Box alignItems="center" as="span" display="inline-flex" gap={1}>
           <Link
             data-testid={`grid-${runId}-${taskId}`}
             id={`grid-${runId}-${taskId}`}
@@ -113,6 +127,11 @@ export const GridTI = ({ dagId, instance, isGroup, isMapped, onClick, runId, tas
               <StateIcon size={10} state={instance.state} />
             </Badge>
           </Link>
+          {simulationMetricLabel ? (
+            <Text color={isBottleneck ? "orange.600" : "fg.subtle"} fontSize="2xs" lineHeight={1}>
+              {simulationMetricLabel}
+            </Text>
+          ) : undefined}
         </Box>
       </TaskInstanceTooltip>
     </Flex>

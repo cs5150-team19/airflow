@@ -33,6 +33,7 @@ from opentelemetry.trace import StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from sqlalchemy import (
     JSON,
+    Boolean,
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
@@ -231,6 +232,9 @@ class DagRun(Base, LoggingMixin):
 
     partition_key: Mapped[str | None] = mapped_column(StringID(), nullable=True)
     partition_date: Mapped[datetime | None] = mapped_column(UtcDateTime, nullable=True)
+
+    # Simulation flag (Sprint 2)
+    is_simulation: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
 
     # Remove this `if` after upgrading Sphinx-AutoAPI
     if not TYPE_CHECKING and "BUILDING_AIRFLOW_DOCS" in os.environ:

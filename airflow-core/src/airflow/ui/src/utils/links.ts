@@ -81,22 +81,35 @@ export const buildTaskInstanceUrl = (params: {
   mapIndex?: string;
   runId: string;
   taskId: string;
+  isSimulating?: boolean;  
 }): string => {
-  const { currentPathname, dagId, isGroup = false, isMapped = false, mapIndex, runId, taskId } = params;
+  const { currentPathname, dagId, isGroup = false, isMapped = false, mapIndex, runId, taskId, isSimulating } = params;
   const groupPath = isGroup ? "group/" : "";
   const additionalPath =
     isGroup || (isMapped && (mapIndex === undefined || mapIndex === "-1"))
       ? ""
       : getTaskInstanceAdditionalPath(currentPathname);
 
-  let basePath = `/dags/${dagId}/runs/${runId}/tasks/${groupPath}${taskId}`;
+  const base = isSimulating ? `/dags/${dagId}/simulation/runs/${runId}/tasks/${groupPath}${taskId}` 
+                         : `/dags/${dagId}/runs/${runId}/tasks/${groupPath}${taskId}`;
 
+  let finalPath = base;
+  // Skip the /mapped suffix for task groups: dynamic task groups have
+  // isMapped=true but no /tasks/group/:groupId/mapped route exists.
+  // Restores the upstream guard from PR #63205 that was lost when this
+  // function was restructured to support isSimulating.
   if (isMapped && !isGroup) {
-    basePath += `/mapped`;
+    finalPath += `/mapped`;
     if (mapIndex !== undefined && mapIndex !== "-1") {
-      basePath += `/${mapIndex}`;
+      finalPath += `/${mapIndex}`;
     }
   }
 
-  return `${basePath}${additionalPath}`;
+  return `${finalPath}${additionalPath}`;
+};
+
+export const addSimulationPrefix = (path: string, isSimulating: boolean): string => {
+  if (!isSimulating) return path;
+  if (path.includes('/simulation')) return path;
+  return path.replace(/^(\/dags\/[^/]+)/, '$1/simulation');
 };

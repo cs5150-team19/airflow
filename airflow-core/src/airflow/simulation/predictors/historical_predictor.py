@@ -1,0 +1,258 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+"""Historical data-based runtime predictor."""
+
+from __future__ import annotations
+
+import statistics
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+
+from airflow.simulation.data.historical_data_extractor import (
+    get_historical_runtimes,
+    get_historical_runtimes_by_fingerprint,
+    get_historical_runtimes_by_operator,
+)
+from airflow.simulation.predictor_interface import (
+    DeterministicPredictor,
+    PredictorInterface,
+    TaskRuntimeEstimate,
+)
+
+# Minimum confidence assigned to exact-match historical estimates.
+_HISTORICAL_BASE_CONFIDENCE: float = 0.7
+# Maximum confidence ceiling.
+_HISTORICAL_MAX_CONFIDENCE: float = 0.95
+# Confidence range for cross-DAG fingerprint matches — same operator + same
+# work signal (callable, bash command, SQL). Sits between exact match and the
+# operator-only fallback because the work signal is finer-grained than
+# operator class alone but still less specific than a same-(dag_id, task_id)
+# match.
+_FINGERPRINT_BASE_CONFIDENCE: float = 0.6
+_FINGERPRINT_MAX_CONFIDENCE: float = 0.85
+# Confidence range for operator-type cross-DAG estimates (lower than exact match).
+_OPERATOR_BASE_CONFIDENCE: float = 0.55
+_OPERATOR_MAX_CONFIDENCE: float = 0.75
+# Default minimum number of runs required before using historical data.
+_DEFAULT_MIN_RUNS: int = 3
+
+
+class AggregationMethod(str, Enum):
+    """Supported statistical aggregation methods."""
+
+    MEDIAN = "median"
+    MEAN = "mean"
+    P90 = "p90"
+    P95 = "p95"
+
+
+def _percentile(data: list[float], pct: float) -> float:
+    """Compute a percentile value from sorted data."""
+    sorted_data = sorted(data)
+    k = (len(sorted_data) - 1) * (pct / 100.0)
+    f = int(k)
+    c = f + 1
+    if c >= len(sorted_data):
+        return sorted_data[-1]
+    return sorted_data[f] + (k - f) * (sorted_data[c] - sorted_data[f])
+
+
+def _filter_outliers(durations: list[float], num_mad: float = 3.0) -> list[float]:
+    """
+    Remove outliers using the median absolute deviation (MAD).
+
+    Unlike mean/stdev, the median and MAD are robust to outliers — a
+    single extreme value cannot inflate the spread enough to hide itself.
+
+    Values more than *num_mad* scaled MADs from the median are removed.
+    Returns the original list unchanged when there are fewer than 3 data
+    points or when the MAD is zero (all values are identical).
+    """
+    if len(durations) < 3:
+        return durations
+    med = statistics.median(durations)
+    abs_devs = [abs(d - med) for d in durations]
+    mad = statistics.median(abs_devs)
+    if mad == 0:
+        # All central values are identical; keep only those equal to the median.
+        return [d for d in durations if d == med]
+    # Scale factor 1.4826 makes MAD consistent with std dev for normal data.
+    scaled_mad = mad * 1.4826
+    return [d for d in durations if abs(d - med) <= num_mad * scaled_mad]
+
+
+def _aggregate(durations: list[float], method: AggregationMethod) -> float:
+    """Aggregate a list of durations using the specified method."""
+    if method == AggregationMethod.MEDIAN:
+        return statistics.median(durations)
+    if method == AggregationMethod.MEAN:
+        return statistics.mean(durations)
+    if method == AggregationMethod.P90:
+        return _percentile(durations, 90)
+    if method == AggregationMethod.P95:
+        return _percentile(durations, 95)
+    return statistics.median(durations)
+
+
+def _compute_confidence(
+    sample_size: int,
+    base: float = _HISTORICAL_BASE_CONFIDENCE,
+    ceiling: float = _HISTORICAL_MAX_CONFIDENCE,
+) -> float:
+    """
+    Scale confidence based on how many data points were used.
+
+    More data points → higher confidence, capped at *ceiling*.
+
+    Args:
+        sample_size: Number of data points used for the estimate.
+        base: Starting confidence at *_DEFAULT_MIN_RUNS* samples.
+        ceiling: Maximum confidence value.
+    """
+    bonus = min((sample_size - _DEFAULT_MIN_RUNS) / 50.0, 1.0) * (ceiling - base)
+    return min(base + max(bonus, 0.0), ceiling)
+
+
+class HistoricalPredictor(PredictorInterface):
+    """
+    Predicts task runtime from historical execution data.
+
+    Falls back to :class:`DeterministicPredictor` when insufficient
+    history is available.
+
+    Args:
+        aggregation: The statistical method used to aggregate durations.
+        min_runs: Minimum number of historical runs required.  Below this
+            threshold the predictor falls back to the deterministic
+            heuristic.
+        max_runs: Maximum number of recent runs to fetch.
+        lookback_days: Only consider runs from the last *lookback_days*
+            days.  ``None`` means no time restriction.
+        filter_outliers: When *True*, remove values beyond 3 standard
+            deviations before aggregating.
+    """
+
+    def __init__(
+        self,
+        *,
+        aggregation: AggregationMethod = AggregationMethod.MEDIAN,
+        min_runs: int = _DEFAULT_MIN_RUNS,
+        max_runs: int = 100,
+        lookback_days: int | None = 30,
+        filter_outliers: bool = True,
+    ) -> None:
+        self.aggregation = aggregation
+        self.min_runs = max(min_runs, 1)
+        self.max_runs = max_runs
+        self.lookback_days = lookback_days
+        self.filter_outliers_enabled = filter_outliers
+        self._fallback = DeterministicPredictor()
+
+    def estimate_task(
+        self,
+        task_id: str,
+        operator_type: str,
+        context: dict | None = None,
+    ) -> TaskRuntimeEstimate:
+        dag_id = (context or {}).get("dag_id", "")
+
+        start_date = None
+        if self.lookback_days is not None:
+            start_date = datetime.now(tz=timezone.utc) - timedelta(days=self.lookback_days)
+
+        # --- Level 1: exact match (same dag_id + task_id) ---
+        runtimes = get_historical_runtimes(
+            dag_id,
+            task_id,
+            start_date=start_date,
+            limit=self.max_runs,
+        )
+        durations = self._extract_durations(runtimes)
+
+        if durations is not None:
+            return TaskRuntimeEstimate(
+                task_id=task_id,
+                operator_type=operator_type,
+                estimated_seconds=int(round(_aggregate(durations, self.aggregation))),
+                confidence=_compute_confidence(len(durations)),
+            )
+
+        # --- Level 2: cross-DAG fingerprint match (same operator + same work
+        # signal — Python callable, bash command, SQL — across all DAGs) ---
+        fingerprint = (context or {}).get("task_fingerprint")
+        if fingerprint:
+            fp_runtimes = get_historical_runtimes_by_fingerprint(
+                fingerprint,
+                start_date=start_date,
+                limit=self.max_runs,
+            )
+            fp_durations = self._extract_durations(fp_runtimes)
+
+            if fp_durations is not None:
+                return TaskRuntimeEstimate(
+                    task_id=task_id,
+                    operator_type=operator_type,
+                    estimated_seconds=int(round(_aggregate(fp_durations, self.aggregation))),
+                    confidence=_compute_confidence(
+                        len(fp_durations),
+                        base=_FINGERPRINT_BASE_CONFIDENCE,
+                        ceiling=_FINGERPRINT_MAX_CONFIDENCE,
+                    ),
+                )
+
+        # --- Level 3: operator-type match (same operator across all DAGs) ---
+        operator_runtimes = get_historical_runtimes_by_operator(
+            operator_type,
+            start_date=start_date,
+            limit=self.max_runs,
+        )
+        operator_durations = self._extract_durations(operator_runtimes)
+
+        if operator_durations is not None:
+            return TaskRuntimeEstimate(
+                task_id=task_id,
+                operator_type=operator_type,
+                estimated_seconds=int(round(_aggregate(operator_durations, self.aggregation))),
+                confidence=_compute_confidence(
+                    len(operator_durations),
+                    base=_OPERATOR_BASE_CONFIDENCE,
+                    ceiling=_OPERATOR_MAX_CONFIDENCE,
+                ),
+            )
+
+        # --- Level 4: hardcoded heuristic ---
+        return self._fallback.estimate_task(task_id, operator_type, context)
+
+    def _extract_durations(self, runtimes: list) -> list[float] | None:
+        """
+        Extract valid durations and apply outlier filtering.
+
+        Returns a list of durations if enough data points remain after
+        filtering, or ``None`` to signal that the caller should try the
+        next fallback level.
+        """
+        durations = [r.duration for r in runtimes if r.duration is not None]
+
+        if len(durations) < self.min_runs:
+            return None
+
+        if self.filter_outliers_enabled:
+            durations = _filter_outliers(durations)
+            if len(durations) < self.min_runs:
+                return None
+
+        return durations

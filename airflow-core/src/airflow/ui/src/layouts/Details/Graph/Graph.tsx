@@ -19,8 +19,8 @@
 import { Box, Spinner, useToken } from "@chakra-ui/react";
 import { ReactFlow, Background, MiniMap, type Node as ReactFlowNode } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "usehooks-ts";
 
 import { useDagRunServiceGetDagRun, useStructureServiceStructureData } from "openapi/queries";
@@ -36,6 +36,11 @@ import { flattenGraphNodes } from "src/layouts/Details/Grid/utils.ts";
 import { useDependencyGraph } from "src/queries/useDependencyGraph";
 import { useGridTiSummariesStream } from "src/queries/useGridTISummaries.ts";
 import { getReactFlowThemeStyle } from "src/theme";
+import {
+  getSimulationDisplayOptions,
+  getSimulationTaskDisplayMetadata,
+  type SimulationReportLike,
+} from "src/utils/simulationDisplay";
 
 import { FitViewOnLayout } from "./components/FitViewOnLayout";
 import { GraphControls } from "./components/GraphControls";
@@ -48,14 +53,94 @@ import { nodeColor } from "./utils/nodeColor";
 // its internal shallow-equality check on every render.
 const defaultEdgeOptions = { zIndex: 1 };
 
+const getLatestSimulationId = (dagId: string): string | null => {
+  if (!dagId) {
+    return null;
+  }
+
+  const raw = globalThis.localStorage.getItem(`airflow.latestSimulation.${dagId}`);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { simulationId?: string };
+    return parsed.simulationId ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchSimulationReport = async (dagId: string, simulationId: string): Promise<SimulationReportLike | undefined> => {
+  const response = await fetch(
+    `/api/v2/dags/${encodeURIComponent(dagId)}/simulate/${encodeURIComponent(simulationId)}`,
+  );
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  return response.json() as Promise<SimulationReportLike>;
+};
+
 export const Graph = () => {
   const { colorMode = "light" } = useColorMode();
   const { dagId = "", groupId, runId = "", taskId } = useParams();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const isSimulating = location.pathname.includes("/simulation");
+  const simulationId = searchParams.get("simulation_id");
+  const [simulationReport, setSimulationReport] = useState<SimulationReportLike | undefined>(undefined);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const selectedVersion = useSelectedVersion();
 
   const { depth, filterRoot, graphFilters, hasActiveFilter, includeDownstream, includeUpstream } =
     useGraphSearchParams();
+  const simulationDisplayOptions = getSimulationDisplayOptions(searchParams);
+
+  useEffect(() => {
+    const onSimulationTriggered = (event: Event) => {
+      const simulationEvent = event as CustomEvent<{ dagId: string }>;
+
+      if (simulationEvent.detail?.dagId === dagId) {
+        setRefreshToken((value: number) => value + 1);
+      }
+    };
+
+    globalThis.addEventListener("airflow:simulation-triggered", onSimulationTriggered);
+
+    return () => {
+      globalThis.removeEventListener("airflow:simulation-triggered", onSimulationTriggered);
+    };
+  }, [dagId]);
+
+  useEffect(() => {
+    if (!isSimulating || !dagId) {
+      setSimulationReport(undefined);
+      return;
+    }
+
+    const selectedSimulationId = simulationId ?? getLatestSimulationId(dagId);
+
+    if (!selectedSimulationId) {
+      setSimulationReport(undefined);
+      return;
+    }
+
+    let isCancelled = false;
+
+    void fetchSimulationReport(dagId, selectedSimulationId).then((report) => {
+      if (!isCancelled) {
+        setSimulationReport(report);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [dagId, isSimulating, simulationId, refreshToken]);
 
   // corresponds to the "bg", "bg.emphasized", "border.inverted" semantic tokens
   const [oddLight, oddDark, evenLight, evenDark, selectedDarkColor, selectedLightColor] = useToken("colors", [
@@ -120,25 +205,37 @@ export const Graph = () => {
   });
 
   const { data: dagRun } = useDagRunServiceGetDagRun({ dagId, dagRunId: runId }, undefined, {
-    enabled: Boolean(runId),
+    enabled: Boolean(dagId) && Boolean(runId),
   });
-
   const { summariesByRunId } = useGridTiSummariesStream({
     dagId,
     runIds: runId ? [runId] : [],
-    states: dagRun ? [dagRun.state] : undefined,
+    states: dagRun === undefined ? undefined : [dagRun.state],
   });
   const gridTISummaries = runId ? summariesByRunId.get(runId) : undefined;
+  const simulationMetadataByTaskId = getSimulationTaskDisplayMetadata(
+    (data?.nodes ?? []).filter((node) => node.type === "task").map((node) => node.id),
+    simulationDisplayOptions,
+    (data?.edges ?? []).map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+    })),
+    simulationReport,
+  );
 
   // Add task instances to the node data but without having to recalculate how the graph is laid out
   const nodesWithTI = data?.nodes.map((node) => {
     const taskInstance = gridTISummaries?.task_instances.find((ti) => ti.task_id === node.id);
+    const simulationMetadata = simulationMetadataByTaskId[node.id];
 
     return {
       ...node,
       data: {
         ...node.data,
+        isBottleneck: simulationMetadata?.isBottleneck ?? false,
+        isCriticalPath: simulationMetadata?.isCriticalPath ?? false,
         isSelected: node.id === taskId || node.id === groupId || node.id === `dag:${dagId}`,
+        simulationMetricLabel: simulationMetadata?.metricLabel,
         taskInstance,
       },
     };

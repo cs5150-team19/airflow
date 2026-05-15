@@ -1,9 +1,26 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import final
+
 
 class OperatorType(str, Enum):
     PYTHON = "PythonOperator"
@@ -13,22 +30,25 @@ class OperatorType(str, Enum):
     S3_KEY = "S3KeySensor"
     UNKNOWN = "Unknown"
 
+
 _OPERATOR_RUNTIME_SECONDS: dict[str, int] = {
     OperatorType.PYTHON: 30,
     OperatorType.BASH: 10,
     OperatorType.MYSQL: 60,
     OperatorType.POSTGRES: 60,
     OperatorType.S3_KEY: 300,
-    OperatorType.UNKNOWN: 30
+    OperatorType.UNKNOWN: 30,
 }
 
 # Confidence value for the deterministic heuristic predictor (no historical data)
 _DETERMINISTIC_CONFIDENCE: float = 0.5
 
+
 class PredictedOutcome(str, Enum):
     SUCCESS = "success"
     FAILURE = "failure"
     UNKNOWN = "unknown"
+
 
 @dataclass
 class TaskRuntimeEstimate:
@@ -37,12 +57,14 @@ class TaskRuntimeEstimate:
     estimated_seconds: int
     confidence: float  # 0.0 to 1.0
 
+
 @dataclass
 class SimulationEstimate:
     dag_id: str
     task_estimates: list[TaskRuntimeEstimate]
     total_task_seconds: int
     predicted_outcome: PredictedOutcome
+
 
 class PredictorInterface(ABC):
     """
@@ -57,11 +79,10 @@ class PredictorInterface(ABC):
         self,
         task_id: str,
         operator_type: str,
-        context: dict | None = None
+        context: dict | None = None,
     ) -> TaskRuntimeEstimate:
         """
         Return a runtime estimate for a single task.
-        Subclasses must implement this method.
 
         Args:
             task_id: Unique identifier for the task.
@@ -78,7 +99,7 @@ class PredictorInterface(ABC):
         self,
         dag_id: str,
         tasks: list[dict],
-        context: dict | None = None
+        context: dict | None = None,
     ) -> SimulationEstimate:
         """
         Return a full simulation estimate for a DAG.
@@ -92,7 +113,7 @@ class PredictorInterface(ABC):
             self.estimate_task(
                 t["task_id"],
                 t.get("operator_type", OperatorType.UNKNOWN),
-                context
+                context,
             )
             for t in tasks
         ]
@@ -103,13 +124,14 @@ class PredictorInterface(ABC):
             dag_id=dag_id,
             task_estimates=task_estimates,
             total_task_seconds=total_seconds,
-            predicted_outcome=PredictedOutcome.SUCCESS  # TODO: replace with model prediction in future implementation
+            predicted_outcome=PredictedOutcome.SUCCESS,
         )
 
-# Sprint 2 Implementation
+
 class DeterministicPredictor(PredictorInterface):
     """
     Estimates runtime using a constant-based heuristic.
+
     No historical data required.
     """
 
@@ -117,12 +139,12 @@ class DeterministicPredictor(PredictorInterface):
         self,
         task_id: str,
         operator_type: str,
-        context: dict | None = None
+        context: dict | None = None,
     ) -> TaskRuntimeEstimate:
-        seconds = _OPERATOR_RUNTIME_SECONDS.get(operator_type, 30) # Default when operator_type is not found
+        seconds = _OPERATOR_RUNTIME_SECONDS.get(operator_type, 30)
         return TaskRuntimeEstimate(
             task_id=task_id,
             operator_type=operator_type,
             estimated_seconds=seconds,
-            confidence=_DETERMINISTIC_CONFIDENCE
+            confidence=_DETERMINISTIC_CONFIDENCE,
         )

@@ -40,9 +40,12 @@ export const TaskNode = ({
     isGroup,
     isMapped,
     isOpen,
+    isBottleneck,
+    isCriticalPath,
     isSelected,
     label,
     operator,
+    simulationMetricLabel,
     setupTeardownType,
     taskInstance,
     tooltip,
@@ -98,7 +101,15 @@ export const TaskNode = ({
             // Alternate background color for nested open groups
             bg={isOpen && depth !== undefined && depth % 2 === 0 ? "bg.muted" : "bg"}
             borderColor={
-              isSelected ? "blue.500" : taskInstance?.state ? `${taskInstance.state}.solid` : "border"
+              isCriticalPath
+                ? "red.500"
+                : isBottleneck
+                  ? "orange.500"
+                  : isSelected
+                    ? "blue.500"
+                    : taskInstance?.state
+                      ? `${taskInstance.state}.solid`
+                      : "border"
             }
             borderRadius={5}
             borderWidth={isSelected ? 4 : 2}
@@ -133,6 +144,11 @@ export const TaskNode = ({
             >
               {isGroup ? translate("graph.taskGroup") : displayOperator}
             </Text>
+            {Boolean(simulationMetricLabel) ? (
+              <Text color={isBottleneck ? "orange.600" : "fg.subtle"} fontSize="2xs" fontWeight="medium">
+                {simulationMetricLabel}
+              </Text>
+            ) : undefined}
             {taskInstance === undefined ? undefined : (
               <HStack>
                 <StateBadge fontSize="xs" state={taskInstance.state}>

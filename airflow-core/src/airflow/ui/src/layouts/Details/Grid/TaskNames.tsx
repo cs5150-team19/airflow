@@ -16,12 +16,12 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Box, chakra, Flex, Link } from "@chakra-ui/react";
+import { Box, chakra, Flex, Link, Text } from "@chakra-ui/react";
 import type { VirtualItem } from "@tanstack/react-virtual";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { FiChevronUp } from "react-icons/fi";
-import { Link as RouterLink, useParams, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useParams, useSearchParams, useLocation } from "react-router-dom";
 
 import { TaskName } from "src/components/TaskName";
 import { useGroups } from "src/context/groups";
@@ -35,11 +35,12 @@ type Props = {
   readonly nodes: Array<GridTask>;
   readonly onRowClick?: () => void;
   readonly virtualItems?: Array<VirtualItem>;
+  readonly isSimulating?: boolean;
 };
 
 const indent = (depth: number) => `${depth * 0.75 + 0.5}rem`;
 
-export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
+export const TaskNames = ({ nodes, onRowClick, virtualItems, isSimulating = false}: Props) => {
   const { t: translate } = useTranslation("dag");
   const { hoveredTaskId, setHoveredTaskId } = useHover();
   const { toggleGroupId } = useGroups();
@@ -88,6 +89,7 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
   const itemsToRender =
     virtualItems ?? nodes.map((_, index) => ({ index, size: ROW_HEIGHT, start: index * ROW_HEIGHT }));
 
+
   return (
     <>
       {itemsToRender.map((virtualItem) => {
@@ -99,12 +101,17 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
 
         const isSelected = node.id === taskId || node.id === groupId;
         const isHovered = hoveredTaskId === node.id;
+        const metricLabel = node.simulationMetricLabel;
+
+        // Build base path with simulation prefix if needed
+        const basePath = isSimulating ? `/dags/${dagId}/simulation` : `/dags/${dagId}`;
 
         return (
           <Box
             bg={isSelected ? "brand.emphasized" : isHovered ? "brand.muted" : undefined}
             borderBottomWidth={1}
-            borderColor={node.isGroup ? "border.emphasized" : "border"}
+            borderColor={node.isCriticalPath ? "red.500" : node.isBottleneck ? "orange.500" : node.isGroup ? "border.emphasized" : "border"}
+            borderLeftWidth={node.isCriticalPath || node.isBottleneck ? 3 : 0}
             borderTopWidth={virtualItem.index === 0 ? 1 : 0}
             cursor="pointer"
             data-node-id={node.id}
@@ -128,12 +135,9 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
                   onClick={onClick}
                   replace
                   style={{ outline: "none" }}
-                  to={{
-                    pathname: `/dags/${dagId}/tasks/group/${node.id}`,
-                    search,
-                  }}
+                  to={isSimulating ? `/dags/${dagId}/simulation/tasks/group/${node.id}` : `/dags/${dagId}/tasks/group/${node.id}`}
                 >
-                  <Flex alignItems="center" width="100%">
+                  <Flex alignItems="center" justifyContent="space-between" width="100%">
                     <TaskName
                       fontSize="sm"
                       fontWeight="normal"
@@ -143,6 +147,11 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
                       paddingLeft={indent(node.depth)}
                       setupTeardownType={node.setup_teardown_type}
                     />
+                    {metricLabel ? (
+                      <Text color={node.isBottleneck ? "orange.600" : "fg.subtle"} fontSize="2xs" pe={2}>
+                        {metricLabel}
+                      </Text>
+                    ) : undefined}
                     <chakra.span
                       _focus={{ outline: "none" }}
                       alignItems="center"
@@ -170,19 +179,23 @@ export const TaskNames = ({ nodes, onRowClick, virtualItems }: Props) => {
                 <RouterLink
                   onClick={onRowClick}
                   replace
-                  to={{
-                    pathname: `/dags/${dagId}/tasks/${node.id}`,
-                    search,
-                  }}
+                  to={isSimulating ? `/dags/${dagId}/simulation/tasks/${node.id}` : `/dags/${dagId}/tasks/${node.id}`}
                 >
-                  <TaskName
-                    fontSize="sm"
-                    fontWeight="normal"
-                    isMapped={Boolean(node.is_mapped)}
-                    label={node.label}
-                    paddingLeft={indent(node.depth)}
-                    setupTeardownType={node.setup_teardown_type}
-                  />
+                  <Flex alignItems="center" justifyContent="space-between" width="100%">
+                    <TaskName
+                      fontSize="sm"
+                      fontWeight="normal"
+                      isMapped={Boolean(node.is_mapped)}
+                      label={node.label}
+                      paddingLeft={indent(node.depth)}
+                      setupTeardownType={node.setup_teardown_type}
+                    />
+                    {metricLabel ? (
+                      <Text color={node.isBottleneck ? "orange.600" : "fg.subtle"} fontSize="2xs" pe={2}>
+                        {metricLabel}
+                      </Text>
+                    ) : undefined}
+                  </Flex>
                 </RouterLink>
               </Link>
             )}

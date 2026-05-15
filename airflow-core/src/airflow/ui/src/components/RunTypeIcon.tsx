@@ -21,6 +21,7 @@ import { HiDatabase } from "react-icons/hi";
 import { HiLightningBolt } from "react-icons/hi";
 import { MdPlayArrow, MdOutlineSchedule } from "react-icons/md";
 import { RiArrowGoBackFill } from "react-icons/ri";
+import { FiCpu } from "react-icons/fi";
 
 import type { DAGRunResponse } from "openapi/requests/types.gen";
 
@@ -46,6 +47,8 @@ export const RunTypeIcon = ({ runType, ...rest }: Props) => {
       return <HiLightningBolt style={iconStyle} {...rest} />;
     case "scheduled":
       return <MdOutlineSchedule style={iconStyle} {...rest} />;
+    case "simulation":
+      return <FiCpu style={iconStyle} {...rest} />;
     default:
       return undefined;
   }

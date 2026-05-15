@@ -17,11 +17,11 @@
 # under the License.
 
 """
-Add simulation fields to TaskInstance.
+Add simulation fields to task_instance and dag_run.
 
-Revision ID: a1b2c3d4e5f6
-Revises: 6222ce48e289
-Create Date: 2026-03-09 00:00:00.000000
+Revision ID: 49ed3350068d
+Revises: fde9ed84d07b
+Create Date: 2026-04-24 00:00:00.000000
 
 """
 
@@ -30,29 +30,37 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "a1b2c3d4e5f6"
-down_revision = "6222ce48e289"
+revision = "49ed3350068d"
+down_revision = "fde9ed84d07b"
 branch_labels = None
 depends_on = None
-airflow_version = "3.2.0"
+airflow_version = "3.3.0"
 
 
 def upgrade():
-    """Add is_simulation, estimated_runtime, and predicted_outcome to task_instance."""
+    """Add is_simulation, estimated_runtime, predicted_outcome to task_instance; is_simulation to dag_run."""
     with op.batch_alter_table("task_instance", schema=None) as batch_op:
         batch_op.add_column(
-            sa.Column("is_simulation", sa.Boolean, nullable=False, server_default="0"),
+            sa.Column("is_simulation", sa.Boolean(), nullable=False, server_default=sa.false()),
         )
         batch_op.add_column(
-            sa.Column("estimated_runtime", sa.Float, nullable=True),
+            sa.Column("estimated_runtime", sa.Float(), nullable=True),
         )
         batch_op.add_column(
-            sa.Column("predicted_outcome", sa.String(20), nullable=True),
+            sa.Column("predicted_outcome", sa.String(length=50), nullable=True),
+        )
+
+    with op.batch_alter_table("dag_run", schema=None) as batch_op:
+        batch_op.add_column(
+            sa.Column("is_simulation", sa.Boolean(), nullable=False, server_default=sa.false()),
         )
 
 
 def downgrade():
-    """Remove simulation fields from task_instance."""
+    """Remove simulation fields from task_instance and dag_run."""
+    with op.batch_alter_table("dag_run", schema=None) as batch_op:
+        batch_op.drop_column("is_simulation")
+
     with op.batch_alter_table("task_instance", schema=None) as batch_op:
         batch_op.drop_column("predicted_outcome")
         batch_op.drop_column("estimated_runtime")
