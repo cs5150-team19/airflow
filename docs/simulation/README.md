@@ -102,8 +102,6 @@ docs/simulation/
 ├── README.md
 ├── user-guide/
 ├── maintainer-guide/
-├── design/
-├── demos/
 ├── attribution/
 └── assets/
 ```
