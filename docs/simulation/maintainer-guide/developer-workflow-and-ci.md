@@ -1,4 +1,4 @@
-# Developer Workflow & Style Guide
+# Developer Workflow & CI/CD
 
 ## Branching Strategy
 

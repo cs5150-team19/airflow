@@ -1,4 +1,4 @@
-# Frontend
+# Frontend Architecture
 
 ## Key Components
 

@@ -1,4 +1,4 @@
-# Architecture
+# System Design
 
 ## Subsystems
 

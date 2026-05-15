@@ -50,18 +50,19 @@ Documentation focused on using the simulation feature.
 
 ## Maintainer Guide
 
-Documentation focused on development, testing, deployment,
-and future maintenance.
+Documentation focused on system design, deployment,
+testing infrastructure, and long-term maintenance of
+the DAG Simulation Feature.
 
-- [Architecture](maintainer-guide/architecture.md)
-- [Deployment](maintainer-guide/deployment.md)
-- [Database](maintainer-guide/database.md)
-- [API](maintainer-guide/api.md)
-- [Frontend](maintainer-guide/frontend.md)
-- [Testing](maintainer-guide/testing.md)
-- [Developer Workflow](maintainer-guide/developer-workflow.md)
-- [Requirements](maintainer-guide/requirements.md)
+- [System Design](maintainer-guide/system-design.md)
+- [Frontend Architecture](maintainer-guide/frontend-architecture.md)
+- [Data Model & Schema](maintainer-guide/data-model-and-schema.md)
+- [API Reference](maintainer-guide/api.md)
+- [Deployment Procedure](maintainer-guide/deployment-procedure.md)
 - [Rollback Procedures](maintainer-guide/rollback.md)
+- [Test Facilities](maintainer-guide/testing-facilities.md)
+- [Development Workflow & CI/CD](maintainer-guide/development-workflow-and-ci.md)
+- [Requirements & Specifications](maintainer-guide/requirements.md)
 
 # Simulation Feature Architecture
 
@@ -78,8 +79,8 @@ The simulation feature consists of several major subsystems:
 Additional architecture documentation is available in:
 
 - [Architecture Overview](maintainer-guide/architecture.md)
-- [Database Design](maintainer-guide/database.md)
-- [Frontend Design](maintainer-guide/frontend.md)
+- [Database Design](maintainer-guide/data-model-and-schema.md)
+- [Frontend Design](maintainer-guide/frontend-architecture.md)
 
 # Typical Workflows
 

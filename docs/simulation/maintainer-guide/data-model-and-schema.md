@@ -1,4 +1,4 @@
-# Database
+# Data Model & Schema
 
 ## Schema Changes
 
