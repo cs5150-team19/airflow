@@ -2484,6 +2484,9 @@ class TestTaskInstance:
             "dag_version_id": mock.ANY,
             "context_carrier": {},
             "span_status": SpanStatus.ENDED,
+            "is_simulation": True,
+            "estimated_runtime": 45.67,
+            "predicted_outcome": "success",
         }
         # Make sure we aren't missing any new value in our expected_values list.
         expected_keys = {f"task_instance.{key}" for key in expected_values}
