@@ -22,6 +22,8 @@ allowing users to:
 
 The feature integrates into Airflow's existing backend, REST API, CLI,
 and React frontend.
+# Demo Video
+https://youtu.be/JsBuMl7RRgg
 
 # Overview
 
