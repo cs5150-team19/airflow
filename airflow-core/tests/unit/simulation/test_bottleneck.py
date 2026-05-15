@@ -32,7 +32,7 @@ from airflow.api_fastapi.core_api.datamodels.simulation import TaskSimulationRes
 from airflow.simulation.critical_path import get_critical_path
 
 
-def _task(task_id: str, seconds: int) -> TaskSimulationResponse:
+def _task(task_id: str, seconds: float) -> TaskSimulationResponse:
     return TaskSimulationResponse(
         task_id=task_id,
         operator_type="PythonOperator",
