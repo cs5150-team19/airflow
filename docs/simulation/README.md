@@ -31,8 +31,6 @@ The documentation is separated into multiple sections:
 |---|---|
 | `user-guide/` | Documentation for DAG authors and end users |
 | `maintainer-guide/` | Internal architecture and deployment documentation |
-| `design/` | UI mockups, diagrams, and design artifacts |
-| `demos/` | Demo videos and screenshots |
 | `attribution/` | Licensing and ownership agreements |
 | `assets/` | Images and diagrams used throughout documentation |
 
