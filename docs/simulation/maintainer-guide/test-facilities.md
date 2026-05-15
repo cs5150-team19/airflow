@@ -88,3 +88,15 @@ Informal usability testing was conducted with three participants (15-20 min sess
 | Confidence score alone insufficient to understand estimate source | Medium | Show predictor source label alongside confidence score |
 | Display Options panel has low visibility | Medium | Move closer to the diagram or expand the panel; auto-open after simulation trigger |
 | Interface assumes Airflow knowledge | Low | Add contextual tooltips for key terms (critical path, DAG, operator) |
+
+### Benchmark Testing
+
+| Test Dags              | Run 1 | Run 2 | Run 3 | Simulation Time |  Error |
+| ---------------------- | ----: | ----: | ----: | --------------: | -----: |
+| weather_etl            | 3.564 | 3.735 | 3.608 |           2.923 | 24.38% |
+| linear_hello           | 3.186 | 2.365 |  3.17 |           3.564 | 18.43% |
+| parallel_sales_etl     | 4.275 |  3.97 | 3.958 |           3.206 | 26.88% |
+| branching_quality_gate | 3.456 | 3.972 | 4.288 |           3.343 | 16.82% |
+| dynamic_mapping_scores |  2.71 | 3.253 | 3.531 |           2.341 | 35.18% |
+| complex_simulation_lab | 5.707 | 6.785 | 6.724 |           4.659 | 37.48% |
+
